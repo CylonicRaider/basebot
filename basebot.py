@@ -117,6 +117,10 @@ class Bot(object):
                     variable "BASEBOT_ROOM_FORMAT" is tried, if that does
                     not exist, the module-level default ROOM_FORMAT is
                     taken.
+    rename_logger : Allows to re-assign the logger instance variable
+                    when the room changes (will use the result of
+                    logging.getLogger(roomname) as the logger). If not set,
+                    the instance variable logger will never be changed.
 
     Interesting class variables:
     NAME     : The "name" of the bot to be used for logging (and similar
@@ -151,15 +155,16 @@ class Bot(object):
         self.users = {}
         self.users_nick = {}
         self.msgid = 0
+        self.rename_logger = True
         self.logger = logging
+        self._exiting = False
 
-    def connect(self, _n=6, _exc=None):
+    def _connect(self, _n=6, _exc=None):
         """
-        connect() -> None
+        _connect() -> None
 
-        Try to connect to the configured room.
-        Re-connection attempts are made five times if the connection
-        fails, after that, an exception is raised.
+        This is an internal back-end for connect().
+        Don't override this method.
         """
         if _n <= 0: raise _exc[1]
         try:
@@ -171,6 +176,8 @@ class Bot(object):
             url = room_format % self.roomname
             self.logger.info('Connecting to %s...' % url)
             self.conn = websocket.create_connection(url)
+            if self.rename_logger:
+                self.logger = logging.getLogger(self.roomname)
         except WSException:
             self.logger.exception('Connection lost; will retry '
                 'in 10 seconds...')
@@ -183,6 +190,55 @@ class Bot(object):
             self.connect(_n - 1, sys.exc_info())
         else:
             self.msgid = 0
+
+    def connect(self):
+        """
+        connect() -> None
+
+        Try to connect to the configured room.
+        Re-connection attempts are made five times if the connection
+        fails, after that, an exception is raised.
+
+        This method is called to estabilish a connection to a (new)
+        room; you can override it you need to hook it.
+        """
+        return self._connect()
+
+    def disconnect(self, final=False):
+        """
+        disconnect(final=False) -> None
+
+        Break this bot's connection. If final is false, nothing in
+        particular happens, and the connection is estabilished
+        again after some time. If final is true, a flag is set
+        indicating the bot should not try to re-connect, but rather
+        exit.
+        This method is asynchronous. Use other means to determine
+        when the bot is online again.
+        """
+        if final: self._exiting = True
+        self.conn.close()
+
+    def exit(self):
+        """
+        exit() -> None
+
+        Shorthand for disconnect(True).
+        """
+        return disconnect(True)
+
+    def change_room(self, roomname, password=None):
+        """
+        change_room(self, roomname, password=None) -> None
+
+        Switch this bot to another room, so, make is disconnect from
+        the current room, and re-connect to another one.
+        This method is asynchronous. Use other means to determine
+        when the bot is online again.
+        """
+        self.roomname = roomname
+        self.password = password
+        self.disconnect()
 
     def send_raw(self, data):
         """
@@ -505,6 +561,9 @@ class Bot(object):
                 self.logger.error('Connection lost; '
                     'reconnecting in 10sec...')
                 time.sleep(10)
+                if self._exiting:
+                    self.shutdown()
+                    break
                 self.connect()
                 self.login()
             except IOError as e:
@@ -550,6 +609,15 @@ class ThreadedBot(Bot):
     def __exit__(self, *args):
         if self.lock is not None:
             return self.lock.__exit__(*args)
+
+    def connect(self):
+        """
+        connect() -> None
+
+        See Bot.connect() for usage.
+        """
+        with self:
+            return Bot.connect(self)
 
     def update_user(self, session, **data):
         """
