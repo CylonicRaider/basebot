@@ -77,7 +77,7 @@ def extract_message_data(m):
 
     See also: normalize_nick() for nickname normalization.
     """
-    d = m.get('data', {})
+    d = m.get('data') or {}
     s = d.get('sender', {})
     c = d.get('content')
     p = d.get('parent')
@@ -182,12 +182,12 @@ class Bot(object):
             self.logger.exception('Connection lost; will retry '
                 'in 10 seconds...')
             time.sleep(10)
-            self.connect(_n - 1, sys.exc_info())
+            self._connect(_n - 1, sys.exc_info())
         except IOError as e:
             self.logger.exception('I/O error; will retry '
                 'in 10 seconds...')
             time.sleep(10)
-            self.connect(_n - 1, sys.exc_info())
+            self._connect(_n - 1, sys.exc_info())
         else:
             self.msgid = 0
 
