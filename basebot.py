@@ -96,6 +96,58 @@ def normalize_nick(nick):
     """
     return WHITESPACE_RE.sub('', nick).lower()
 
+def format_datetime(timestamp, fractions=True):
+    """
+    format_datetime(timestamp, fractions=True) -> str
+
+    Produces a string representation of the timestamp similar to
+    the ISO 8601 format: "YYYY-MM-DD HH:MM:SS.FFF UTC". If fractions
+    is false, the ".FFF" part is omitted. As the platform the bots
+    are used on is international, there is little point to use any kind
+    of timezone but UTC.
+
+    See also: format_delta()
+    """
+    ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(timestamp))
+    if fractions: ts += '.%03d' % (int(timestamp * 1000) % 1000)
+    return ts + ' UTC'
+def format_delta(delta, fractions=True):
+    """
+    format_delta(delta, fractions=True) -> str
+
+    Format a time difference. delta is a numeric value holding the time
+    difference to be formatted in seconds. The return value is composed
+    like that: "[- ][Xd ][Xh ][Xm ][X[.FFF]s]", with the brackets indicating
+    possible omission. If fractions is False, or the given time is an
+    integer, the fractional part is omitted. All components are included as
+    needed, so the result for 3600 would be "1h". As a special case, the
+    result for 0 is "0s" (instead of nothing).
+
+    See also: format_datetime()
+    """
+    if not fractions:
+        delta = int(delta)
+    if delta == 0: return '0s'
+    ret = []
+    if delta < 0:
+        ret.append('-')
+        delta = -delta
+    if delta >= 86400:
+        ret.append('%dd' % (delta // 86400))
+        delta %= 86400
+    if delta >= 3600:
+        ret.append('%dh' % (delta // 3600))
+        delta %= 3600
+    if delta >= 60:
+        ret.append('%dm' % (delta // 60))
+        delta %= 60
+    if delta != 0:
+        if delta % 1 != 0:
+            ret.append('%ss' % round(delta, 3))
+        else:
+            ret.append('%ds' % delta)
+    return ' '.join(ret)
+
 # Main class.
 class Bot(object):
     """
@@ -121,10 +173,12 @@ class Bot(object):
                     when the room changes (will use the result of
                     logging.getLogger(roomname) as the logger). If not set,
                     the instance variable logger will never be changed.
+    starttime     : The floating-point UNIX timestamp of the instantiation
+                    of the bot. Used for !uptime.
 
-    Interesting class variables:
+    Interesting class variables (both to be overridden by subclasses):
     NAME     : The "name" of the bot to be used for logging (and similar
-               purposes)
+               purposes).
     NICK_NAME: The default nickname for new instances of the bot.
 
     Class usage:
@@ -149,6 +203,7 @@ class Bot(object):
         self.roomname = roomname
         self.password = password
         self.nickname = self.NICK_NAME
+        self.starttime = time.time()
         self.room_format = None
         self.conn = None
         self.send_callbacks = {}
@@ -515,6 +570,61 @@ class Bot(object):
         self.update_user(data['session_id'], id=data.get('id'),
                          name=data.get('to'), last_seen=Ellipsis)
 
+    def handle_commands(self, info, message, do_ping=True, do_spec_ping=None,
+                        do_uptime=True, short_help=None, long_help=None):
+        """
+        handle_commands(info, message, do_ping=True, do_spec_ping=None,
+                        do_uptime=True, short_help=None,
+                        long_help=None) -> bool
+
+        Handler for "standard commands", that are:
+        !ping        : Generic responsiveness test. Reply is a single
+                       "Pong!". Controlled by the do_ping argument.
+        !ping @nick  : Responsiveness test for an individual bot. Controlled
+                       by the do_spec_ping argument, if that is None (or
+                       omitted), do_ping is used.
+        !help        : Generic help request. Responses should be short, very
+                       preferably one-liners, with mention of the specific
+                       help command if necessary. The response is specified
+                       by short_help, if that is None, the command is
+                       ignored.
+        !help @nick  : Specific help request. The response is given by either
+                       the long_help argument, or the short_help argument
+                       if the former is None (or omitted); if both are None,
+                       the command is ignored.
+        !uptime @nick: Returns a message about how long the bot is running.
+        Full usage of those commands is recommended.
+
+        The method is intended to be called from handle_chat(), it returns
+        whether a command has been processed.
+        """
+        cnt = info['content']
+        if cnt == '!ping':
+            if do_ping:
+                self.send_chat('Pong!', info['id'])
+                return True
+        elif cnt == '!ping @' + self.nickname:
+            if (do_ping if do_spec_ping is None else do_spec_ping):
+                self.send_chat('Pong!', info['id'])
+                return True
+        elif cnt == '!help':
+            if short_help:
+                self.send_chat(short_help, info['id'])
+                return True
+        elif cnt == '!help @' + self.nickname:
+            text = long_help or short_help
+            if text:
+                self.send_chat(text, info['id'])
+                return True
+        elif cnt == '!uptime @' + self.nickname:
+            if do_uptime:
+                ts = time.time()
+                self.send_chat('/me is up since %s (%s)' %
+                    (format_datetime(self.starttime),
+                    format_delta(ts - self.starttime)), info['id'])
+                return True
+        return False
+
     def handle_chat(self, info, message):
         """
         handle_chat(info, message) -> None
@@ -669,6 +779,8 @@ class MiniBot(ThreadedBot):
         self.setup = kwds.get('setup', None)
         self.callback = kwds.get('callback', None)
         self.do_ping = kwds.get('do_ping', True)
+        self.do_spec_ping = kwds.get('do_spec_ping', None)
+        self.do_uptime = kwds.get('do_uptime', True)
         self.short_help = kwds.get('short_help', None)
         self.long_help = kwds.get('long_help', None)
         if self.setup: self.setup(self)
@@ -678,16 +790,9 @@ class MiniBot(ThreadedBot):
         See Bot.handle_chat() for details.
         """
         cnt = info['content']
-        if cnt == '!ping' or cnt == '!ping @' + self.nickname:
-            if self.do_ping:
-                self.send_chat('Pong!', info['id'])
-        elif cnt == '!help':
-            if self.short_help:
-                self.send_chat(self.short_help, info['id'])
-        elif cnt == '!help @' + self.nickname:
-            helpstr = self.long_help or self.short_help
-            if helpstr:
-                self.send_chat(helpstr, info['id'])
+        self.handle_commands(info, message, do_ping=self.do_ping,
+            do_spec_ping=self.do_spec_ping, do_uptime=self.do_uptime,
+            short_help=self.short_help, long_help=self.long_help)
         replies = []
         if hasattr(self.regexes, 'keys'):
             for k in self.regexes:
@@ -772,20 +877,26 @@ def run_minibot(args, **config):
                     item value as the remaining positional arguments (if it
                     is a tuple), or the item value as the second position
                     argument (if it is not a tuple).
-    setup     : A function called after the MiniBot instance is created. Can
-                set things up for other functions.
-    callback  : A function taking the following arguments:
-                - The MiniBot instance.
-                - The message info dictinary.
-                - The raw message.
-                - A list of replies already sent by regex handlers.
-    do_ping   : Boolean indicating whether to react to "!ping [@nickname]"
-                commands. Defaults to True.
-    short_help: Short help, displayed as a reponse to a "!help" command.
-                If None, or not given, the command is ignored.
-    long_help : Long help; displayed as a response to a "!help @nickname"
-                command; if this is not defined, but short_help is, the
-                latter is used for both comamnds.
+    setup       : A function called after the MiniBot instance is created. Can
+                  set things up for other functions.
+    callback    : A function taking the following arguments:
+                  - The MiniBot instance.
+                  - The message info dictinary.
+                  - The raw message.
+                  - A list of replies already sent by regex handlers.
+    do_ping     : Boolean indicating whether to react to "!ping" commands.
+                  Defaults to True.
+    do_spec_ping: Boolean indicating whether to react to "!ping @nick" commands.
+                  Defaults to do_ping.
+    do_uptime   : Boolean indicating whether to react to "!uptime @nick" commands.
+                  Defaults to True.
+    short_help  : Short help, displayed as a reponse to a "!help" command.
+                  If None, or not given, the command is ignored.
+    long_help   : Long help; displayed as a response to a "!help @nickname"
+                  command; if this is not defined, but short_help is, the
+                  latter is used for both comamnds.
+
+    See also: Bot.handle_commands() for do_ping, do_spec_ping, do_uptime, *_help.
     """
     botname = config.get('botname', Bot.NAME)
     nickname = config.get('nickname', Bot.NICK_NAME)
