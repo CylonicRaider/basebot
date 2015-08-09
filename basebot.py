@@ -5,6 +5,35 @@ Bot library for euphoria.io.
 
 For quick and simple bots, see run_minibot(); for more sophisticated ones,
 use ThreadedBot (Bot is very similar, but not thread-safe) with run_main().
+
+EXAMPLE OF run_minibot():
+>>> import sys, basebot
+>>> def frobnicator(match, info):
+>>>     return match.group(1)[::-1] # Reply with the string reversed.
+>>> if __name__ == '__main__':
+>>>     basebot.run_minibot(sys.argv[1:], botname='TestBot', nickname='test',
+>>>         short_help='This is a test bot. For a bit more behavior, try '
+>>>             'posting a message with a single "test" at the beginning.',
+>>>         regexes={'^test$': 'Test!', '^test (.+)$': frobnicator})
+
+EXAMPLE OF BOT CLASS + run_main():
+>>> import sys, basebot
+>>> class TestBot(basebot.ThreadedBot):
+>>>     def handle_chat(self, info, message):
+>>>         # Handle standard commands (returns True if actually handled).
+>>>         if self.handle_commands(info, message, short_help='This is a '
+>>>                 'test bot. For a bit more behavior, try posting a '
+>>>                 'message with a single "test" at the beginning.'):
+>>>             return
+>>>         # The textual content of the message;
+>>>         # the message ID to reply to.
+>>>         text, reply_id = info['content'], info['id']
+>>>         if text == 'test':
+>>>             self.send_chat('Test!', reply_id)
+>>>         elif text.startswith('test '):
+>>>             self.send_chat(text[5:][::-1], reply_id)
+>>> if __name__ == '__main__':
+>>>     basebot.run_main(TestBot, sys.argv[1:])
 """
 
 # Base class for Euphoria chat bots.
@@ -186,6 +215,9 @@ class Bot(object):
     that let be run by calling run().
     >>> b = BotClass(roomname)
     >>> b.run()
+    Alternatively, in particular for running from the command line,
+    run_main() can be used; apart from instantiation, it also configures
+    logging.
     """
 
     # Name for logging.
@@ -843,7 +875,8 @@ def run_minibot(args, **config):
     run_minibot(args, **config) -> MiniBot
 
     Convenience functin for starting mini-bots. Uses an instance of the
-    MiniBot class. Configuration is done by keyword arguments:
+    MiniBot class. args is an argument tuple that is directly passed to
+    run_main(). Configuration is done by keyword arguments:
 
     botname   : Name to be used for logging.
     nickname  : Nickname to assume.
@@ -896,6 +929,8 @@ def run_minibot(args, **config):
                   command; if this is not defined, but short_help is, the
                   latter is used for both comamnds.
 
+    See the module-level documentation for an example.
+
     See also: Bot.handle_commands() for do_ping, do_spec_ping, do_uptime, *_help.
     """
     botname = config.get('botname', Bot.NAME)
@@ -927,6 +962,8 @@ def run_main(cls, argv, **config):
     run_main), and its main() method is called; after that, the bot is
     returned. main() can be overridden to do nothing if only the bot
     instance is needed.
+
+    See the module-level documentation for an example.
     """
     # Apply arguments.
     if argv is not None:
