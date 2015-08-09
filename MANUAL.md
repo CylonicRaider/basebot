@@ -7,7 +7,10 @@ library, including launching an example bot.
 
 ## Installation
 
-1. First of all, the dependency of the library,
+1. The presence of a working [Python](http://www.python.org/downloads)
+   installation is silently assumed.
+
+2. First of all, the dependency of the library,
    [`websocket-client`](http://pypi.python.org/pypi/websocket-client/) has to
    be installed (if it is not as yet). For that, either download and extract
    the source archive from the linked page and run the `setup.py` file, or —
@@ -23,11 +26,11 @@ library, including launching an example bot.
    or install the library for both Python versions (both `python setup.py`
    *and* `python3 setup.py`).
 
-2. The installation of `basebot` itself is trivial, either copy the
+3. The installation of `basebot` itself is trivial, either copy the
    `basebot.py` file into the directory where you will store your source
    files, or to some location in the standard module search path.
 
-3. **Done**!
+4. **Done**!
 
 ## Testing / example bot
 
@@ -70,6 +73,12 @@ if __name__ == '__main__':
 ```
 
 ## Further/advanced notes
+
+### Further reading
+
+The best source of documentation about the library (I know about) is [the
+library itself](basebot.py); read its inline docs for further information,
+your use your favorite documentation generator.
 
 ### Alternative sites
 
