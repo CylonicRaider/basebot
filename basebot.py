@@ -53,7 +53,7 @@ import websocket
 from websocket import WebSocketException as WSException
 
 # Regex for mentions.
-MENTION_RE = re.compile('\B@([^\s]+?(?=$|[,.!?:;&\'\s]|&#39;|&quot;|&amp;))')
+MENTION_RE = re.compile('\B@([^\s]+?(?=$|[,.!?;&\'\s]|&#39;|&quot;|&amp;))')
 
 # Regex for whitespace.
 WHITESPACE_RE = re.compile('[^\S]')
