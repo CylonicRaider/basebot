@@ -53,7 +53,7 @@ import websocket
 from websocket import WebSocketException as WSException
 
 # Regex for mentions.
-MENTION_RE = re.compile('\B@([^\s]+?(?=$|[,.!?;&\'\s]|&#39;|&quot;|&amp;))')
+MENTION_RE = re.compile('\B@([^\s]+?(?=$|[,.!?;&<>\'\"\s]))')
 
 # Regex for whitespace.
 WHITESPACE_RE = re.compile('[^\S]')
@@ -264,7 +264,11 @@ class Bot(object):
             self.logger.info('Connecting to %s...' % url)
             self.conn = websocket.create_connection(url)
             if self.rename_logger:
-                self.logger = logging.getLogger(self.roomname)
+                if self.nickname is None:
+                    self.logger = logging.getLogger(self.roomname)
+                else:
+                    self.logger = logging.getLogger('%s@%s' %
+                        (self.nickname, self.roomname))
         except WSException:
             self.logger.exception('Connection lost; will retry '
                 'in 10 seconds...')
@@ -305,6 +309,7 @@ class Bot(object):
         """
         if final: self._exiting = True
         self.conn.close()
+        self.conn = None
 
     def exit(self):
         """
@@ -398,16 +403,25 @@ class Bot(object):
 
     def set_nickname(self, name=None):
         """
-        set_nickname(name=None) -> id
+        set_nickname(name=None) -> id or None
 
         Set the specified nickname. If name is None, set the pre-configured
         nickname. If THAT is None, do not send a nickname at all. The
-        pre-configured nickname is updated to reflect the change.
+        pre-configured nickname is updated to reflect the change. If the
+        special value Ellipsis is given as name, then the nickname is
+        reset and no such will be set at the next connect. The return
+        value is either the ID of the message sent to inform the server
+        of the nickname change, or None if currently not connected.
         """
         if name is None: name = self.nickname
         if name is None: return
-        self.nickname = name
-        self.logger.info('Setting nickname: %r' % (name,))
+        if name is Ellipsis:
+            self.logger.info('Resetting nickname')
+            self.nickname = None
+        else:
+            self.logger.info('Setting nickname: %r' % (name,))
+            self.nickname = name
+        if self.conn is None: return None
         return self.send_msg('nick', name=name)
 
     def handle_incoming(self, message):
@@ -695,17 +709,30 @@ class Bot(object):
         self.startup()
         while True:
             try:
-                raw = self.conn.recv()
+                try:
+                    raw = self.conn.recv()
+                except AttributeError:
+                    if self._exiting:
+                        self.logger.warning('Connection aborted; exiting...')
+                        self.shutdown()
+                        break
+                    else:
+                        self.logger.warning('Connection aborted; '
+                            're-connecting...')
+                        self.connect()
+                        self.login()
+                        continue
                 self.logger.debug('< %r' % (raw,))
                 data = json.loads(raw)
                 self.handle_incoming(data)
             except WSException:
+                if self._exiting:
+                    self.logger.warning('Connection lost; shutting down...')
+                    self.shutdown()
+                    break
                 self.logger.error('Connection lost; '
                     'reconnecting in 10sec...')
                 time.sleep(10)
-                if self._exiting:
-                    self.shutdown()
-                    break
                 self.connect()
                 self.login()
             except IOError as e:
@@ -746,11 +773,9 @@ class ThreadedBot(Bot):
         self.lock = threading.RLock()
 
     def __enter__(self):
-        if self.lock is not None:
-            return self.lock.__enter__()
+        return self.lock.__enter__()
     def __exit__(self, *args):
-        if self.lock is not None:
-            return self.lock.__exit__(*args)
+        return self.lock.__exit__(*args)
 
     def connect(self):
         """
@@ -760,6 +785,24 @@ class ThreadedBot(Bot):
         """
         with self:
             return Bot.connect(self)
+
+    def disconnect(self, final=False):
+        """
+        disconnect(self, final=False) -> None
+
+        See Bot.disconnect() for usage.
+        """
+        with self:
+            return Bot.disconnect(self, final)
+
+    def change_room(self, roomname, password=None):
+        """
+        change_room(self, roomname, password=None) -> None
+
+        See Bot.change_room() for usage.
+        """
+        with self:
+            return Bot.change_room(self, roomname, password)
 
     def update_user(self, session, **data):
         """
@@ -1000,6 +1043,10 @@ def run_main(cls, argv, **config):
     if l:
         b.logger = l
     elif roomname is not None:
-        b.logger = logging.getLogger(roomname)
+        nick = cls.NICK_NAME
+        if nick is None:
+            b.logger = logging.getLogger(roomname)
+        else:
+            b.logger = logging.getLogger('%s@%s' % (nick, roomname))
     b.run()
     return b
