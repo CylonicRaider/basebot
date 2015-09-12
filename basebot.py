@@ -788,7 +788,7 @@ class ThreadedBot(Bot):
 
     def disconnect(self, final=False):
         """
-        disconnect(self, final=False) -> None
+        disconnect(final=False) -> None
 
         See Bot.disconnect() for usage.
         """
@@ -797,12 +797,21 @@ class ThreadedBot(Bot):
 
     def change_room(self, roomname, password=None):
         """
-        change_room(self, roomname, password=None) -> None
+        change_room(roomname, password=None) -> None
 
         See Bot.change_room() for usage.
         """
         with self:
             return Bot.change_room(self, roomname, password)
+
+    def set_nickname(self, nickname=None):
+        """
+        set_nickname(name=None) -> id or None
+
+        See Bot.set_nickname() for usage.
+        """
+        with self:
+            return Bot.set_nickname(self, nickname)
 
     def update_user(self, session, **data):
         """
