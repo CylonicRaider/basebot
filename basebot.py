@@ -617,11 +617,12 @@ class Bot(object):
                          name=data.get('to'), last_seen=Ellipsis)
 
     def handle_commands(self, info, message, do_ping=True, do_spec_ping=None,
-                        do_uptime=True, short_help=None, long_help=None):
+                        do_uptime=True, short_help=None, long_help=None,
+                        nick_alias=None):
         """
         handle_commands(info, message, do_ping=True, do_spec_ping=None,
-                        do_uptime=True, short_help=None,
-                        long_help=None) -> bool
+                        do_uptime=True, short_help=None, long_help=None,
+                        nick_alias=None) -> bool
 
         Handler for "standard commands", that are:
         !ping        : Generic responsiveness test. Reply is a single
@@ -641,15 +642,23 @@ class Bot(object):
         !uptime @nick: Returns a message about how long the bot is running.
         Full usage of those commands is recommended.
 
+        The nick_alias parameter specifies an alternative nick-name to
+        respond to (useful for name-changing "gauge" bots).
+
         The method is intended to be called from handle_chat(), it returns
         whether a command has been processed.
         """
         cnt = info['content']
+        if nick_alias is None:
+            check = lambda cmd: (cnt == '!%s @%s' % (cmd, self.nickname))
+        else:
+            check = lambda cmd: (cnt == '!%s @%s' % (cmd, self.nickname) or
+                                 cnt == '!%s @%s' % (cmd, nick_alias))
         if cnt == '!ping':
             if do_ping:
                 self.send_chat('Pong!', info['id'])
                 return True
-        elif cnt == '!ping @' + self.nickname:
+        elif check('ping'):
             if (do_ping if do_spec_ping is None else do_spec_ping):
                 self.send_chat('Pong!', info['id'])
                 return True
@@ -657,12 +666,12 @@ class Bot(object):
             if short_help:
                 self.send_chat(short_help, info['id'])
                 return True
-        elif cnt == '!help @' + self.nickname:
+        elif check('help'):
             text = long_help or short_help
             if text:
                 self.send_chat(text, info['id'])
                 return True
-        elif cnt == '!uptime @' + self.nickname:
+        elif check('uptime'):
             if do_uptime:
                 ts = time.time()
                 self.send_chat('/me is up since %s (%s)' %
