@@ -94,15 +94,16 @@ def extract_message_data(m):
 
     Extract possibly interesting data from the message m as a dictionary.
     Included items:
-    'sender'   : Nickname of the sender of the message.
-    'nsender'  : Normalized nickname of the sender of the message.
-    'sender_id': ID of the sender of the message.
-    'session'  : Session ID of the sender.
-    'content'  : The content of the message.
-    'id'       : The ID of the message (like for replies).
-    'parent'   : The ID of the parent of the message.
-    'mentions' : A set of all names @-mentioned in the message.
-    'raw'      : The raw message.
+    'sender'     : Nickname of the sender of the message.
+    'nsender'    : Normalized nickname of the sender of the message.
+    'sender_id'  : ID of the sender of the message.
+    'session'    : Session ID of the sender.
+    'content'    : The content of the message (empty string if none).
+    'raw_content': The content of the message (None if none).
+    'id'         : The ID of the message (like for replies).
+    'parent'     : The ID of the parent of the message.
+    'mentions'   : A set of all names @-mentioned in the message.
+    'raw'        : The raw message.
 
     See also: normalize_nick() for nickname normalization.
     """
@@ -111,11 +112,12 @@ def extract_message_data(m):
     c = d.get('content')
     p = d.get('parent')
     n = s.get('name')
+    i = c or ''
     if not p: p = None # In case p is the empty string.
-    return {'id': d.get('id'), 'parent': p, 'content': c,
+    return {'id': d.get('id'), 'parent': p, 'content': i, 'raw_content': c,
             'sender': n, 'nsender': normalize_nick(n) if n else None,
             'sender_id': s.get('id'), 'session': s.get('session_id'),
-            'mentions': set(scan_mentions(c)), 'raw': m}
+            'mentions': set(scan_mentions(i)), 'raw': m}
 def normalize_nick(nick):
     """
     normalize_nick(nick) -> str
