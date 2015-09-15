@@ -72,7 +72,7 @@ if __name__ == '__main__':
                  '^!calc\s+(\d+)\s+([-+*/])\s+(\d+)$': calculator})
 ```
 
-## Further/advanced notes
+## Further/Advanced Notes
 
 ### Further reading
 
