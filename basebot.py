@@ -650,17 +650,23 @@ class Bot(object):
         The method is intended to be called from handle_chat(), it returns
         whether a command has been processed.
         """
+        def match(cmd, name):
+            # Command must match exactly.
+            if cnt[:len(cmd)] != cmd: return False
+            # Be a bit liberal with the nick-name.
+            return (normalize_nick(cnt[len(cmd):].strip()) ==
+                    normalize_nick(name))
         cnt = info['content']
         if nick_alias is None:
-            check = lambda cmd: (cnt == '!%s @%s' % (cmd, self.nickname))
+            check = lambda cmd: (match(cmd, self.nickname))
         else:
-            check = lambda cmd: (cnt == '!%s @%s' % (cmd, self.nickname) or
-                                 cnt == '!%s @%s' % (cmd, nick_alias))
+            check = lambda cmd: (match(cmd, self.nickname) or
+                                 match(cmd, nick_alias))
         if cnt == '!ping':
             if do_ping:
                 self.send_chat('Pong!', info['id'])
                 return True
-        elif check('ping'):
+        elif check('!ping'):
             if (do_ping if do_spec_ping is None else do_spec_ping):
                 self.send_chat('Pong!', info['id'])
                 return True
@@ -668,12 +674,12 @@ class Bot(object):
             if short_help:
                 self.send_chat(short_help, info['id'])
                 return True
-        elif check('help'):
+        elif check('!help'):
             text = long_help or short_help
             if text:
                 self.send_chat(text, info['id'])
                 return True
-        elif check('uptime'):
+        elif check('!uptime'):
             if do_uptime:
                 ts = time.time()
                 self.send_chat('/me is up since %s (%s)' %
