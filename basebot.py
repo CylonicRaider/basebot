@@ -655,7 +655,7 @@ class Bot(object):
             if cnt[:len(cmd)] != cmd: return False
             # Be a bit liberal with the nick-name.
             return (normalize_nick(cnt[len(cmd):].strip()) ==
-                    normalize_nick(name))
+                    normalize_nick('@' + name))
         cnt = info['content']
         if nick_alias is None:
             check = lambda cmd: (match(cmd, self.nickname))
