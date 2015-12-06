@@ -22,6 +22,82 @@ import websocket
 from websocket import WebSocketException as WSException, \
     WebSocketConnectionClosedException as WSCCException
 
+# Regex for @-mentions
+# From github.com/euphoria-io/heim/blob/master/client/lib/stores/chat.js as
+# of commit f9d5527beb41ac3e6e0fee0c1f5f4745c49d8f7b (adapted).
+_MENTION_DELIMITER = r'[,.!?;&<\'"\s]'
+MENTION_RE = re.compile('(?:^|(?<=' + _MENTION_DELIMITER + r'))@(\S+?)(?=' +
+                        _MENTION_DELIMITER + '|$)')
+
+# Regex for whitespace.
+WHITESPACE_RE = re.compile('\s+')
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+def normalize_nick(nick):
+    """
+    normalize_nick(nick) -> str
+
+    Remove whitespace from the given nick, and perform any other
+    normalizations on it.
+    """
+    return WHITESPACE_RE.sub('', nick).lower()
+
+def format_datetime(timestamp, fractions=True):
+    """
+    format_datetime(timestamp, fractions=True) -> str
+
+    Produces a string representation of the timestamp similar to
+    the ISO 8601 format: "YYYY-MM-DD HH:MM:SS.FFF UTC". If fractions
+    is false, the ".FFF" part is omitted. As the platform the bots
+    are used on is international, there is little point to use any kind
+    of timezone but UTC.
+
+    See also: format_delta()
+    """
+    ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(timestamp))
+    if fractions: ts += '.%03d' % (int(timestamp * 1000) % 1000)
+    return ts + ' UTC'
+
+def format_delta(delta, fractions=True):
+    """
+    format_delta(delta, fractions=True) -> str
+
+    Format a time difference. delta is a numeric value holding the time
+    difference to be formatted in seconds. The return value is composed
+    like that: "[- ][Xd ][Xh ][Xm ][X[.FFF]s]", with the brackets indicating
+    possible omission. If fractions is False, or the given time is an
+    integer, the fractional part is omitted. All components are included as
+    needed, so the result for 3600 would be "1h". As a special case, the
+    result for 0 is "0s" (instead of nothing).
+
+    See also: format_datetime()
+    """
+    if not fractions:
+        delta = int(delta)
+    if delta == 0: return '0s'
+    ret = []
+    if delta < 0:
+        ret.append('-')
+        delta = -delta
+    if delta >= 86400:
+        ret.append('%dd' % (delta // 86400))
+        delta %= 86400
+    if delta >= 3600:
+        ret.append('%dh' % (delta // 3600))
+        delta %= 3600
+    if delta >= 60:
+        ret.append('%dm' % (delta // 60))
+        delta %= 60
+    if delta != 0:
+        if delta % 1 != 0:
+            ret.append('%ss' % round(delta, 3))
+        else:
+            ret.append('%ds' % delta)
+    return ' '.join(ret)
+
 # ---------------------------------------------------------------------------
 # Lowest abstraction layer.
 # ---------------------------------------------------------------------------
@@ -100,7 +176,7 @@ class Record(dict):
     """
     Record(...) -> dict
 
-    A dictionary that exports some items as attributes; as well as provides
+    A dictionary that exports some items as attributes as well as provides
     static defaults for some keys.
     """
 
@@ -195,6 +271,12 @@ class Message(Record):
                        full content) (optional)
 
     All optional attributes default to None.
+
+    Additional read-only properties:
+    mention_list: Tuple of (offset, string) pairs listing all the @-mentions
+                  in the message (including the @ signs).
+    mention_set : frozenset of names @-mentioned in the message (excluding
+                  the @ signs).
     """
     _exports_ = ('id', 'parent', 'previous_edit_id', 'time', 'sender',
                  'content', 'encryption_key_id', 'edited', 'deleted',
@@ -203,6 +285,40 @@ class Message(Record):
     _defaults_ = {'parent': None, 'previous_edit_id': None,
                   'encryption_key_id': None, 'edited': None, 'deleted': None,
                   'truncated': None}
+
+    def __init__(__self, *__args, **__kwds):
+        Record.__init__(__self, *__args, **__kwds)
+        __self.__lock = threading.RLock()
+        __self.__mention_list = None
+        __self.__mention_set = None
+
+    def __setitem__(self, key, value):
+        with self.__lock:
+            Record.__setitem__(self, key, value)
+            self.__mention_list = None
+            self.__mention_set = None
+
+    @property
+    def mention_list(self):
+        with self.__lock:
+            if self.__mention_list is None:
+                l, s, o = [], self.content, 0
+                ls = len(s)
+                while o < ls:
+                    m = MENTION_RE.search(s, o)
+                    if not m: break
+                    l.append((m.start(), m.group()))
+                    o = m.end()
+                self.__mention_list = tuple(l)
+            return self.__mention_list
+
+    @property
+    def mention_set(self):
+        with self.__lock:
+            if self.__mention_set is None:
+                self.__mention_set = frozenset(i[1][1:]
+                    for i in self.__mention_list)
+            return self.__mention_set
 
 class SessionView(Record):
     """
@@ -218,8 +334,30 @@ class SessionView(Record):
                 to False)
     is_manager: if true, this session belongs to a manager of the room
                 (defaults to False)
+
+    Additional read-only properties:
+    is_account: Whether this session has an account.
+    is_agent  : Whether this session is neither a bot nor has an account.
+    is_bot    : Whether this is a bot.
+    norm_name : Normalized name.
     """
     _exports_ = ('id', 'name', 'server_id', 'server_era', 'session_id',
                  'is_staff', 'is_manager')
 
     _defaults_ = {'is_staff': False, 'is_manager': False}
+
+    @property
+    def is_account(self):
+        return self['id'].startswith('account:')
+
+    @property
+    def is_agent(self):
+        return self['id'].startswith('agent:')
+
+    @property
+    def is_bot(self):
+        return self['id'].startswith('bot:')
+
+    @property
+    def norm_name(self):
+        return normalize_nick(self.name)
