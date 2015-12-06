@@ -32,6 +32,10 @@ MENTION_RE = re.compile('(?:^|(?<=' + _MENTION_DELIMITER + r'))@(\S+?)(?=' +
 # Regex for whitespace.
 WHITESPACE_RE = re.compile('\s+')
 
+# Default connection URL template.
+URL_TEMPLATE = os.environ.get('BASEBOT_URL_TEMPLATE',
+                              'wss://euphoria.io/room/{}/ws')
+
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -98,86 +102,13 @@ def format_delta(delta, fractions=True):
             ret.append('%ds' % delta)
     return ' '.join(ret)
 
-# ---------------------------------------------------------------------------
-# Lowest abstraction layer.
-# ---------------------------------------------------------------------------
-
-class JSONWebSocket:
-    """
-    JSONWebSocketWrapper(ws) -> new instance
-
-    JSON-reading/writing WebSocket wrapper.
-    Provides recv()/send() methods that transparently encode/decode JSON.
-    """
-
-    def __init__(self, ws):
-        """
-        __init__(ws) -> None
-
-        Initializer. See class docstring for invocation details.
-        """
-        self.ws = ws
-        self.lock = threading.RLock()
-
-    def _recv_raw(self):
-        """
-        _recv_raw() -> str
-
-        Receive a WebSocket frame, and return it unmodified.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
-        """
-        return self.ws.recv()
-
-    def recv(self):
-        """
-        recv() -> object
-
-        Receive a single WebSocket frame, decode it using JSON, and return
-        the resulting object.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
-        """
-        return json.loads(self._recv_raw())
-
-    def _send_raw(self, data):
-        """
-        _send_raw(data) -> None
-
-        Send the given data without modification.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
-        """
-        self.ws.send(data)
-
-    def send(self, obj):
-        """
-        send(obj) -> None
-
-        JSON-encode the given object, and send it.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
-        """
-        self._send_raw(json.dumps(obj))
-
-    def close(self):
-        """
-        close() -> None
-
-        Close this connection. Repeated calls will succeed.
-        """
-        self.ws.close()
-
-# ---------------------------------------------------------------------------
-# Record classes.
-# ---------------------------------------------------------------------------
-
 class Record(dict):
     """
-    Record(...) -> dict
+    Record(...) -> new instance
 
     A dictionary that exports some items as attributes as well as provides
-    static defaults for some keys.
+    static defaults for some keys. Can be constructed in any way a dict
+    can.
     """
 
     # Export list.
@@ -212,6 +143,98 @@ class Record(dict):
 
     def __missing__(self, key):
         return self._defaults_[key]
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+class BasebotException(Exception):
+    "Base exception class."
+
+class NoRoomError(BasebotException):
+    "No room specified before HeimEndpoint.connect() call."
+
+class NoConnectionError(BasebotException):
+    "HeimEndpoint currently connected."
+
+# ---------------------------------------------------------------------------
+# Lowest abstraction layer.
+# ---------------------------------------------------------------------------
+
+class JSONWebSocket:
+    """
+    JSONWebSocketWrapper(ws) -> new instance
+
+    JSON-reading/writing WebSocket wrapper.
+    Provides recv()/send() methods that transparently encode/decode JSON.
+    Reads and writes are serialized with independent locks; the reading
+    lock is to be acquired "outside" the write lock.
+    """
+
+    def __init__(self, ws):
+        """
+        __init__(ws) -> None
+
+        Initializer. See class docstring for invocation details.
+        """
+        self.ws = ws
+        self.rlock = threading.RLock()
+        self.wlock = threading.RLock()
+
+    def _recv_raw(self):
+        """
+        _recv_raw() -> str
+
+        Receive a WebSocket frame, and return it unmodified.
+        Raises a websocket.WebSocketConnectionClosedException (aliased to
+        WSCCException in this module) if the underlying connection closed.
+        """
+        with self.rlock:
+            return self.ws.recv()
+
+    def recv(self):
+        """
+        recv() -> object
+
+        Receive a single WebSocket frame, decode it using JSON, and return
+        the resulting object.
+        Raises a websocket.WebSocketConnectionClosedException (aliased to
+        WSCCException in this module) if the underlying connection closed.
+        """
+        return json.loads(self._recv_raw())
+
+    def _send_raw(self, data):
+        """
+        _send_raw(data) -> None
+
+        Send the given data without modification.
+        Raises a websocket.WebSocketConnectionClosedException (aliased to
+        WSCCException in this module) if the underlying connection closed.
+        """
+        with self.wlock:
+            self.ws.send(data)
+
+    def send(self, obj):
+        """
+        send(obj) -> None
+
+        JSON-encode the given object, and send it.
+        Raises a websocket.WebSocketConnectionClosedException (aliased to
+        WSCCException in this module) if the underlying connection closed.
+        """
+        self._send_raw(json.dumps(obj))
+
+    def close(self):
+        """
+        close() -> None
+
+        Close this connection. Repeated calls will succeed immediately.
+        """
+        self.ws.close()
+
+# ---------------------------------------------------------------------------
+# Euphorian protocol.
+# ---------------------------------------------------------------------------
 
 # Constructed after github.com/euphoria-io/heim/blob/master/doc/api.md as of
 # commit 03906c0594c6c7ab5e15d1d8aa5643c847434c97.
@@ -361,3 +384,198 @@ class SessionView(Record):
     @property
     def norm_name(self):
         return normalize_nick(self.name)
+
+class HeimEndpoint(object):
+    """
+    HeimEndpoint(**config) -> new instance
+
+    Endpoint for the Heim protocol. Provides methods to submit commands,
+    as well as call-back methods for incoming replies/events. Re-connects
+    are handled transparently.
+
+    Attributes (assignable by keyword arguments):
+    url_template: Template to construct URLs from. Its format() method
+                  will be called with the room name as the only argument.
+                  Defaults to the global URL_TEMPLATE variable, which, in
+                  turn, may be overridden by the environment variable
+                  BASEBOT_URL_TEMPLATE (if set when the module is
+                  initialized).
+    roomname    : Name of room to connect to. Defaults to None. Must be
+                  explicitly set for the connection to succeed.
+    nickname    : Nick-name to set on connection. Updated when a nick-reply
+                  is received. Defaults to None; in that case, no nick-name
+                  is set.
+    passcode    : Passcode for private rooms. Sent during (re-)connection.
+                  Defaults to None; no passcode is sent in that case.
+    retry_count : Amount of re-connection attempts until an operation (a
+                  connect or a send) fails.
+    retry_delay : Amount of seconds to wait before a re-connection attempt.
+
+    Other attributes (not assignable by keyword arguments):
+    connection  : A JSONWebSocket backing this HeimEndpoint. May change at
+                  re-connects, or be None when not connected.
+    """
+
+    def __init__(self, **config):
+        """
+        __init__(self, **config) -> None
+
+        Constructor. See class docstring for usage.
+        """
+        self.url_template = config.get('url_template', URL_TEMPLATE)
+        self.roomname = config.get('roomname', None)
+        self.nickname = config.get('nickname', None)
+        self.passcode = config.get('passcode', None)
+        self.retry_count = config.get('retry_count', 4)
+        self.retry_delay = config.get('retry_delay', 10)
+        # Attribute access lock.
+        self.lock = threading.RLock()
+        # Connection lock. To be asserted when connecting, or changing
+        # the connection attribute otherwise; before the attribute lock.
+        self.connlock = threading.RLock()
+        # Underlying connection.
+        self.connection = None
+
+    def __enter__(self):
+        return self.lock.__enter__()
+    def __exit__(self, *args):
+        return self.lock.__exit__(*args)
+
+    def _make_connection(self, url):
+        """
+        _make_connection(url) -> JSONWebSocket
+
+        Actually connect to the given URL. Can be hooked by subclasses.
+        """
+        return JSONWebSocket(websocket.create_connection(url))
+
+    def _connect(self):
+        """
+        _connect() -> None
+
+        Perform a single connection attempt.
+        If already connected, succeeds instantly.
+        Raises a websocket.WebSocketException if failing.
+        Use connect() if you want to re-try in case of a failure.
+        """
+        with self.connlock:
+            with self.lock:
+                if self.connection is not None:
+                    return
+                if self.roomname is None:
+                    raise NoRoomError('Room not specified')
+                url = self.url_template.format(self.roomname)
+            conn = self._make_connection(url)
+            with self.lock:
+                self.connection = conn
+
+    def _reconnect(self):
+        """
+        _reconnect() -> bool
+
+        Try to re-connect (assuming the previous connection just broke).
+        Returns whether succeeded.
+        """
+        with self.connlock:
+            with self.lock:
+                self.connection = None
+            for i in range(self.retry_count):
+                time.sleep(self.retry_delay)
+                try:
+                    self._connect()
+                    return True
+                except WSException:
+                    continue
+            return False
+
+    def connect(self):
+        """
+        connect() -> None
+
+        Connect to the configured room. The server should start the initial
+        handshake. If already connected, to nothing.
+        Raises a NoRoomError if no room is specified.
+        Raises a websocket.WebSocketException if all connection attempts
+        fail.
+        """
+        with self.connlock:
+            try:
+                self._connect()
+            except WSException:
+                if not self._reconnect():
+                    raise
+
+    def _conn_op(self, cb):
+        """
+        _conn_op(callback) -> object
+
+        Internal method backing recv_raw() and send_raw().
+        """
+        with self.lock:
+            conn = self.connection
+            if conn is None:
+                raise NoConnectionError('Not connected')
+        try:
+            return cb(conn, 0)
+        except websocket.WebSocketException:
+            self._reconnect():
+            with self.lock:
+                conn = self.connection
+            if conn is None:
+                raise
+            return cb(conn, 1)
+
+    def recv_raw(self):
+        """
+        recv_raw() -> object
+
+        Receive a single packet from the underlying connection.
+        If the connection fails, try to re-connect, and try again (without
+        trying to re-connect again after that).
+        Raises a NoConnectionError if not connected, or a
+        websocket.WebSocketException if anything fails and the
+        re-connection attempt fails.
+        """
+        return self._conn_op(lambda conn, attempt: conn.recv())
+
+    def send_raw(self, obj, resend=False):
+        """
+        send_raw(obj, resend=False) -> None
+
+        Send the given object to the server.
+        Connection and/or sending errors are handled similarly to
+        recv_raw().
+        If resend is false, the messages will be not re-sent after a
+        reconnect.
+        Returns whether obj was successfully send.
+        """
+        def callback(conn, attempt):
+            if attempt == 0 or resend:
+                conn.send(obj)
+                return True
+            return False
+        return self._conn_op(callback)
+
+    def close(self):
+        """
+        close() -> None
+
+        Close the current connection (if any).
+        """
+        with self.connlock:
+            with self.lock:
+                conn = self.connection
+                self.connection = None
+        if conn is not None: conn.close()
+
+    def reconnect(self):
+        """
+        reconnect() -> None
+
+        Disrupt the current connection (if any) and estabilish a new one.
+        Raises a NoRoomError if no room to connect to is specified.
+        Raises a websocket.WebSocketException if the connection attempt
+        fails.
+        """
+        self.close()
+        self.connect()
