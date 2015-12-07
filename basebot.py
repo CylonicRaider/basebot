@@ -411,9 +411,15 @@ class HeimEndpoint(object):
                   connect or a send) fails.
     retry_delay : Amount of seconds to wait before a re-connection attempt.
 
+    Access to the attributes should be serialized using the instance lock
+    (available in the lock attribute). The __enter__ and __exit__ methods
+    of the lock are exposed, so "with self:" can be used instead of "with
+    self.lock:".
+
     Other attributes (not assignable by keyword arguments):
-    connection  : A JSONWebSocket backing this HeimEndpoint. May change at
-                  re-connects, or be None when not connected.
+    lock        : Attribute access lock. Must be acquired whenever an
+                  attribute is changed, or when multiple accesses to an
+                  attribute should be atomic.
     """
 
     def __init__(self, **config):
@@ -428,13 +434,13 @@ class HeimEndpoint(object):
         self.passcode = config.get('passcode', None)
         self.retry_count = config.get('retry_count', 4)
         self.retry_delay = config.get('retry_delay', 10)
-        # Attribute access lock.
         self.lock = threading.RLock()
-        # Connection lock. To be asserted when connecting, or changing
-        # the connection attribute otherwise; before the attribute lock.
-        self.connlock = threading.RLock()
-        # Underlying connection.
-        self.connection = None
+        # Actual connection.
+        self._connection = None
+        # Whether someone is poking the connection.
+        self._connecting = False
+        # Condition variable to serialize all on.
+        self._conncond = threading.Condition(self.lock)
 
     def __enter__(self):
         return self.lock.__enter__()
@@ -445,128 +451,120 @@ class HeimEndpoint(object):
         """
         _make_connection(url) -> JSONWebSocket
 
-        Actually connect to the given URL. Can be hooked by subclasses.
+        Actually connect to url.
+        Returns the object produced, or raises an exception.
+        Can be hooked by subclasses.
         """
         return JSONWebSocket(websocket.create_connection(url))
+
+    def _attempt(self, func):
+        """
+        _attempt(func) -> object
+
+        Attempt to run func; if it raises an exception, re-try using the
+        specified parameters (retry_count and retry_delay).
+        Func is called with two arguments, the zero-based trial counter,
+        and amount of re-tries that will be attempted.
+        If the last attempt fails, the exception that indicated the
+        failure is raised.
+        If the function call succeeds, the return value of func is passed
+        out.
+        """
+        with self.lock:
+            count, delay = self.retry_count, self.retry_delay
+        for i in range(count + 1):
+            if i: time.sleep(delay)
+            try:
+                return func(i, count)
+            except Exception:
+                if i == count:
+                    raise
+                continue
 
     def _connect(self):
         """
         _connect() -> None
 
-        Perform a single connection attempt.
-        If already connected, succeeds instantly.
-        Raises a websocket.WebSocketException if failing.
-        Use connect() if you want to re-try in case of a failure.
+        Internal back-end for connect(). Takes care of synchronization.
         """
-        with self.connlock:
-            with self.lock:
-                if self.connection is not None:
-                    return
-                if self.roomname is None:
-                    raise NoRoomError('Room not specified')
-                url = self.url_template.format(self.roomname)
-            conn = self._make_connection(url)
-            with self.lock:
-                self.connection = conn
+        with self._conncond:
+            if self.roomname is None:
+                raise NoRoomError('No room specified')
+            while self._connecting:
+                self._conncond.wait()
+            if self._connection is not None:
+                return
+            self._connecting = True
+            url = self.url_template.format(self.roomname)
+        conn = None
+        try:
+            conn = self._attempt(lambda c, a: self._make_connection(url))
+        finally:
+            with self._conncond:
+                self._connecting = False
+                self._connection = conn
+                self._conncond.notifyAll()
+
+    def _disconnect(self):
+        """
+        _disconnect() -> None
+
+        Internal back-end for close(). Takes care of synchronization.
+        """
+        with self._conncond:
+            while self._connecting:
+                self._conncond.wait()
+            conn = self._connection
+            self._connection = None
+            self._conncond.notifyAll()
+        if conn is not None:
+            conn.close()
 
     def _reconnect(self):
         """
-        _reconnect() -> bool
+        _reconnect() -> None
 
-        Try to re-connect (assuming the previous connection just broke).
-        Returns whether succeeded.
+        Considering the current connection to be broken, discard it
+        forcefully (unless another attempt to re-connect is already
+        happening), and try to connect again (only once).
         """
-        with self.connlock:
-            with self.lock:
-                self.connection = None
-            for i in range(self.retry_count):
-                time.sleep(self.retry_delay)
-                try:
-                    self._connect()
-                    return True
-                except WSException:
-                    continue
-            return False
+        with self._conncond:
+            while self._connecting:
+                self._conncond.wait()
+            else:
+                self._connection = None
+            if self._connection is not None:
+                return
+            self._connecting = True
+        conn = None
+        try:
+            conn = self._make_connection(url)
+        finally:
+            with self._conncond:
+                self._connecting = False
+                self._connection = conn
+                self._conncond.notifyAll()
 
     def connect(self):
         """
         connect() -> None
 
-        Connect to the configured room. The server should start the initial
-        handshake. If already connected, to nothing.
-        Raises a NoRoomError if no room is specified.
-        Raises a websocket.WebSocketException if all connection attempts
-        fail.
+        Connect to the configured room.
+        Return instantly if already connected.
+        Raises a NoRoomError is no room is specified, or a
+        websocket.WebSocketException if the connection attempt(s) fail.
+        Re-connections are tried.
         """
-        with self.connlock:
-            try:
-                self._connect()
-            except WSException:
-                if not self._reconnect():
-                    raise
-
-    def _conn_op(self, cb):
-        """
-        _conn_op(callback) -> object
-
-        Internal method backing recv_raw() and send_raw().
-        """
-        with self.lock:
-            conn = self.connection
-            if conn is None:
-                raise NoConnectionError('Not connected')
-        try:
-            return cb(conn, 0)
-        except websocket.WebSocketException:
-            self._reconnect():
-            with self.lock:
-                conn = self.connection
-            if conn is None:
-                raise
-            return cb(conn, 1)
-
-    def recv_raw(self):
-        """
-        recv_raw() -> object
-
-        Receive a single packet from the underlying connection.
-        If the connection fails, try to re-connect, and try again (without
-        trying to re-connect again after that).
-        Raises a NoConnectionError if not connected, or a
-        websocket.WebSocketException if anything fails and the
-        re-connection attempt fails.
-        """
-        return self._conn_op(lambda conn, attempt: conn.recv())
-
-    def send_raw(self, obj, resend=False):
-        """
-        send_raw(obj, resend=False) -> None
-
-        Send the given object to the server.
-        Connection and/or sending errors are handled similarly to
-        recv_raw().
-        If resend is false, the messages will be not re-sent after a
-        reconnect.
-        Returns whether obj was successfully send.
-        """
-        def callback(conn, attempt):
-            if attempt == 0 or resend:
-                conn.send(obj)
-                return True
-            return False
-        return self._conn_op(callback)
+        self._connect()
 
     def close(self):
         """
         close() -> None
 
         Close the current connection (if any).
+        Raises a websocket.WebSocketError is something unexpected happens.
         """
-        with self.connlock:
-            with self.lock:
-                conn = self.connection
-                self.connection = None
-        if conn is not None: conn.close()
+        self._disconnect()
 
     def reconnect(self):
         """
@@ -579,3 +577,74 @@ class HeimEndpoint(object):
         """
         self.close()
         self.connect()
+
+    def get_connection(self):
+        """
+        get_connection() -> JSONWebSocket
+
+        Obtain a reference to the current connection. Waits for all pending
+        connects to finish. May return None if not connected.
+        """
+        with self._conncond:
+            while self._connecting:
+                self._conncond.wait()
+            return self._connection
+
+    def recv_raw(self, retry=True):
+        """
+        recv_raw(retry=True) -> object
+
+        Receive a single object from the server, and return it.
+        May raise a websocket.WebSocketException, or a NoConnectionError
+        if not connected.
+        If retry is true, the operation will be re-tried (after
+        re-connects) before failing entirely.
+        """
+        if retry:
+            return self._attempt(lambda c, a: self.recv_raw(False))
+        conn = self.get_connection()
+        if conn is None:
+            raise NoConnectionError('Not connected')
+        return conn.recv()
+
+    def send_raw(self, obj, retry=True):
+        """
+        send_raw(obj, retry=True( -> object
+
+        Try to send a single object over the connection.
+        My raise a websocket.WebSocketException, or a NoConnectionError
+        if not connected.
+        If retry is true, the operation will be re-tried (after
+        re-connects) before failing entirely.
+        """
+        if retry:
+            return self._attempt(lambda c, a: self.send_raw(obj, False))
+        conn = self.get_connection()
+        if conn is None:
+            raise NoConnectionError('Not connected')
+        return conn.send(obj)
+
+    def receive_single(self):
+        """
+        receive_single() -> None
+
+        Receive and process a single packet.
+        """
+        packet = self.recv_raw()
+        self.process_incoming(packet)
+
+    def receive_loop(self):
+        """
+        receive_loop() -> None
+
+        Receive packets until the connection collapses.
+        """
+        while 1: self.receive_single()
+
+    def process_incoming(self, packet):
+        """
+        process_incoming(packet) -> None
+
+        Process a single packet.
+        """
+        pass
