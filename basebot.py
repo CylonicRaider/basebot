@@ -2,6 +2,21 @@
 
 """
 Bot library for euphoria.io.
+
+Important functions and classes:
+normalize_nick() : Normalize a nick (remove whitespace and convert it to
+                   lower case). Useful for comparison of @-mentions.
+format_datetime(): Format a UNIX timestamp nicely.
+format_delta()   : Format a timestamp difference nicely.
+
+Packet           : An Euphorian packet.
+Message          : Representing a single message.
+SessionView      : Representing a single session.
+
+HeimEndpoint     : A bare-bones implementation of the API; useful for
+                   minimalistic clients, or alternative expansion.
+LoggingEndpoint  : HeimEndpoint maintaining a user list and chat logs
+                   on demand.
 """
 
 # ---------------------------------------------------------------------------
@@ -264,15 +279,16 @@ class Packet(Record):
     _exports_ = ('id', 'type', 'data', 'error', 'throttled',
                  'throttled_reason')
 
-class AccountView(Record):
-    """
-    AccountView describes an account and its preferred names.
-
-    Attributes:
-    id  : the id of the account
-    name: the name that the holder of the account goes by
-    """
-    _exports_ = ('id', 'name')
+## Currently unused.
+#class AccountView(Record):
+#    """
+#    AccountView describes an account and its preferred names.
+#
+#    Attributes:
+#    id  : the id of the account
+#    name: the name that the holder of the account goes by
+#    """
+#    _exports_ = ('id', 'name')
 
 class Message(Record):
     """
@@ -390,6 +406,224 @@ class SessionView(Record):
     def norm_name(self):
         return normalize_nick(self.name)
 
+class UserList(object):
+    """
+    UserList() -> new instance
+
+    An iterable list of SessionView objects, with methods for modification
+    and quick search.
+    """
+
+    def __init__(self):
+        """
+        __init__() -> None
+
+        Constructor. See class docstring for usage.
+        """
+        self._list = []
+        self._by_session_id = {}
+        self._by_agent_id = {}
+        self._by_name = {}
+        self._lock = threading.RLock()
+
+    def __iter__(self):
+        """
+        __iter__() -> iterator
+
+        Iterate over all elements in self.
+        """
+        return iter(self.list())
+
+    def add(self, *lst):
+        """
+        add(*lst) -> None
+
+        Add all the SessionView-s in lst to self, unless already there.
+        """
+        with self._lock:
+            for i in lst:
+                if i.session_id in self._by_session_id: continue
+                self._list.append(i)
+                self._by_session_id[i.session_id] = i
+                self._by_agent_id.setdefault(i.id, []).append(i)
+                self._by_name.setdefault(i.name, []).append(i)
+
+    def remove(self, *lst):
+        """
+        remove(*lst) -> None
+
+        Remove all the SessionView-s in lst from self (unless not there
+        at all).
+        """
+        with self._lock:
+            for i in lst:
+                try:
+                    self._list.remove(self._by_session_id.pop(i.session_id))
+                except (KeyError, ValueError):
+                    pass
+                try:
+                    self._by_agent_id.get(i.id, []).remove(i)
+                pass ValueError:
+                    pass
+                try:
+                    self._by_name.get(i.name, []).remove(i)
+                except ValueError:
+                    pass
+
+    def update(self, *lst):
+        """
+        update(*lst) -> None
+
+        Remove and re-insert all the entries in lst.
+        """
+        with self._lock:
+            self.remove(*lst)
+            self.add(*lst)
+
+    def clear(self):
+        """
+        clear() -> None
+
+        Remove everything from self.
+        """
+        with self._lock:
+            self._list[:] = ()
+            self._by_session_id.clear()
+            self._by_agent_id.clear()
+            self._by_name.clear()
+
+    def list(self):
+        """
+        list() -> list
+
+        Return a (Python) list holding all the SessionViews currently in
+        here.
+        """
+        with self._lock:
+            return list(self._list)
+
+    def for_session(self, id):
+        """
+        for_session(id) -> SessionView
+
+        Return the SessionView corresponding session ID from self.
+        Raises a KeyError if the given session is not known.
+        """
+        with self._lock:
+            return self._by_session_id[id]
+
+    def for_agent(self, id):
+        """
+        for_agent(id) -> list
+
+        Return all the SessionViews known with the given agent ID as a list.
+        """
+        with self._lock:
+            return list(self._by_agent_id.get(id, ()))
+
+    def for_name(self, name):
+        """
+        for_name(name) -> list
+
+        Return all the SessionViews known with the given name as a list.
+        """
+        with self._lock:
+            return list(self._by_name.get(name, ()))
+
+class MessageTree(object):
+    """
+    MessageTree() -> new instance
+
+    Class representing a threaded chat log. Note that, because of Heim's
+    never-forget policy, "deleted" messages are actually only flagged as
+    such, and not "physically" deleted. Editing messages happens by
+    re-adding them.
+    """
+
+    def __init__(self):
+        """
+        __init__() -> None
+
+        Constructor. See class docstring for usage.
+        """
+        self._messages = {}
+        self._children = {}
+        self._lock = threading.RLock()
+
+    def __iter__(self):
+        """
+        __iter__() -> iterator
+
+        Iterate over all elements in self in order.
+        """
+        return iter(self.list())
+
+    def __getitem__(self, key):
+        """
+        __getitem__(key) -> Message
+
+        Equivalent to self.get(key).
+        """
+        return self.get(key)
+
+    def add(self, *lst):
+        """
+        add(*lst) -> None
+
+        Incorporate all the messages in lst into self.
+        """
+        sorts = set()
+        with self._lock:
+            for msg in lst:
+                self._messages[msg.id] = msg
+                c = self._children.setdefault(msg.parent, [])
+                if msg.id not in c: c.append(msg.id)
+                sorts.add(c)
+            for l in sorts:
+                l.sort(key=lambda m: m.id)
+
+    def clear(self):
+        """
+        clear() -> None
+
+        (Actually) remove all the messages from self.
+        """
+        with self._lock:
+            self._messages.clear()
+            self._children.clear()
+
+    def get(self, id):
+        """
+        get(id) -> Message
+
+        Return the message corresponding to the given ID, or raise KeyError
+        if no such message present.
+        """
+        with self._lock:
+            return self._messages[id]
+
+    def list(self, parent=None):
+        """
+        list(parent=None) -> list
+
+        Return all the messages for the given parent (None for top-level
+        messages) in an ordered list.
+        """
+        with self._lock:
+            return [self._messages[i]
+                    for i in self._children.get(parent, ())]
+
+    def all(self):
+        """
+        all() -> list
+
+        Return an ordered list containing all the messages in self.
+        """
+        with self._lock:
+            l = list(self._messages.values())
+            l.sort(key=lambda m: m.id)
+            return l
+
 class HeimEndpoint(object):
     """
     HeimEndpoint(**config) -> new instance
@@ -398,12 +632,6 @@ class HeimEndpoint(object):
     the connection, methods to submit commands, as well as call-back methods
     for some incoming replies/events, and dynamic handlers for arbitrary
     incoming packets. Re-connects are handled transparently.
-    Event handlers are (indirectly) called from the input loop, and should
-    therefore finish quickly, or offload the work to a separate thread.
-    Mind that the Heim server will kick any clients unreponsive for too
-    long times!
-    While account-related event handlers are present, actual support for
-    accounts is lacking, and has to be implemented manually.
 
     Attributes (assignable by keyword arguments):
     url_template: Template to construct URLs from. Its format() method
@@ -423,15 +651,24 @@ class HeimEndpoint(object):
                   connect or a send) fails.
     retry_delay : Amount of seconds to wait before a re-connection attempt.
     handlers    : Packet-type-to-list-of-callables mapping storing handlers
-                  handlers for incoming packets.
+                  for incoming packets.
                   Handlers are called with the packet as the only argument;
-                  handlers for the (virtual) packet type None (i.e. the
-                  None singleton) are called for *any* packet, similarly
-                  to handle_any() (but *after* the built-in handlers).
+                  the packet's '_self' item is set to the HeimEndpoint
+                  instance that received the packet.
+                  Handlers for the (virtual) packet type None (i.e. the None
+                  singleton) are called for *any* packet, similarly to
+                  handle_any() (but *after* the built-in handlers).
                   While commands and replies should be handled by the
                   call-back mechanism, built-in handler methods (on_*();
                   not in the mapping) are present for the asynchronous
                   events.
+                  Event handlers are (indirectly) called from the input loop,
+                  and should therefore finish quickly, or offload the work
+                  to a separate thread. Mind that the Heim server will kick
+                  any clients unreponsive for too long times!
+                  While account-related event handlers are present, actual
+                  support for accounts is lacking, and has to be implemented
+                  manually.
 
     Access to the attributes should be serialized using the instance lock
     (available in the lock attribute). The __enter__ and __exit__ methods
@@ -442,6 +679,8 @@ class HeimEndpoint(object):
     Note that, to actually take effect, changes to the roomname, nickname
     and passcode attributes must be peformed by using the corresponding
     set_*() methods (or by performing the necessary actions oneself).
+    Remember to call the parent class' methods as well, because some of its
+    interna are implemented there!
 
     Other attributes (not assignable by keyword arguments):
     cmdid       : ID of the next command packet to be sent. Used internally.
@@ -1047,3 +1286,29 @@ class HeimEndpoint(object):
                     self.passcode is not None):
                 return self.send_packet('auth', type='passcode',
                                         passcode=self.passcode)
+
+class LoggingEndpoint(HeimEndpoint):
+    """
+    LoggingEndpoint(**config) -> New instance.
+
+    A HeimEndpoint that maintains a user list and chat logs on demand.
+    See HeimEndpoint on configuration details.
+
+    Additional attributes (configurable through keyword arguments):
+    log_users   : Maintain a user list (if false, it will be empty;
+                  defaults to False).
+    log_messages: Maintain a chat log (if false, it will be empty;
+                  defaults to False).
+
+    ...More additional attributes:
+    users   : A UserList, holding the current user list (or nothing).
+    messages: A MessageTree, holding the chat logs (in "natural" order;
+              or nothing).
+    """
+
+    def __init__(self, **config):
+        HeimEndpoint.__init__(self, **config)
+        self.log_users = config.get('log_users', False)
+        self.log_messages = config.get('log_messages', False)
+        self.users = UserList()
+        self.messages = MessageTree()
