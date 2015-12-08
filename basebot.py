@@ -117,6 +117,9 @@ class Record(dict):
     # Defaults mapping.
     _defaults_ = {}
 
+    def __repr__(self):
+        return '%s(%s)' % (self.__class__.__name__, dict.__repr__(self))
+
     def __getattr__(self, name):
         if name not in self._exports_:
             raise AttributeError(name)
@@ -126,7 +129,9 @@ class Record(dict):
             raise AttributeError(name)
 
     def __setattr__(self, name, value):
-        if name not in self._exports_:
+        if name.startswith('_'):
+            return dict.__setattr__(self, name, value)
+        elif name not in self._exports_:
             raise AttributeError(name)
         try:
             self[name] = value
@@ -417,8 +422,12 @@ class HeimEndpoint(object):
     retry_count : Amount of re-connection attempts until an operation (a
                   connect or a send) fails.
     retry_delay : Amount of seconds to wait before a re-connection attempt.
-    handlers    : Packet-type-to-iterable-of-callables mapping storing
-                  handlers handlers for incoming packets.
+    handlers    : Packet-type-to-list-of-callables mapping storing handlers
+                  handlers for incoming packets.
+                  Handlers are called with the packet as the only argument;
+                  handlers for the (virtual) packet type None (i.e. the
+                  None singleton) are called for *any* packet, similarly
+                  to handle_any() (but *after* the built-in handlers).
                   While commands and replies should be handled by the
                   call-back mechanism, built-in handler methods (on_*();
                   not in the mapping) are present for the asynchronous
@@ -465,6 +474,8 @@ class HeimEndpoint(object):
         self._connecting = False
         # Condition variable to serialize all on.
         self._conncond = threading.Condition(self.lock)
+        # Whether the session was properly initiated.
+        self._logged_in = False
 
     def __enter__(self):
         return self.lock.__enter__()
@@ -527,6 +538,8 @@ class HeimEndpoint(object):
             with self._conncond:
                 self._connecting = False
                 self._connection = conn
+                if conn is not None:
+                    self.handle_connect()
                 self._conncond.notifyAll()
 
     def _disconnect(self):
@@ -540,6 +553,10 @@ class HeimEndpoint(object):
                 self._conncond.wait()
             conn = self._connection
             self._connection = None
+            if self._logged_in:
+                self.handle_logout(True)
+                self._logged_in = False
+            self.handle_close(True)
             self._conncond.notifyAll()
         if conn is not None:
             conn.close()
@@ -553,12 +570,16 @@ class HeimEndpoint(object):
         happening), and try to connect again (only once).
         """
         with self._conncond:
+            if not self._connecting:
+                self._connection = None
             while self._connecting:
                 self._conncond.wait()
-            else:
-                self._connection = None
             if self._connection is not None:
                 return
+            if self._logged_in:
+                self.handle_logout(False)
+                self._logged_in = False
+            self.handle_close(False)
             self._connecting = True
         conn = None
         try:
@@ -567,6 +588,8 @@ class HeimEndpoint(object):
             with self._conncond:
                 self._connecting = False
                 self._connection = conn
+                if conn is not None:
+                    self.handle_connect()
                 self._conncond.notifyAll()
 
     def connect(self):
@@ -614,6 +637,24 @@ class HeimEndpoint(object):
                 self._conncond.wait()
             return self._connection
 
+    def handle_connect(self):
+        """
+        handle_connect() -> None
+
+        Called after a connection attempt succeeded.
+        """
+        pass
+
+    def handle_close(self, ok):
+        """
+        handle_close(ok) -> None
+
+        Called after a connection failed (or was normally closed).
+        The ok parameter tells whether the close was normal (ok is true)
+        or abnormal (ok is false).
+        """
+        pass
+
     def recv_raw(self, retry=True):
         """
         recv_raw(retry=True) -> object
@@ -648,22 +689,6 @@ class HeimEndpoint(object):
             raise NoConnectionError('Not connected')
         return conn.send(obj)
 
-    def receive_single(self):
-        """
-        receive_single() -> None
-
-        Receive and process a single packet.
-        """
-        self.handle(self.recv_raw())
-
-    def receive_loop(self):
-        """
-        receive_loop() -> None
-
-        Receive packets until the connection collapses.
-        """
-        while 1: self.receive_single()
-
     def handle(self, packet):
         """
         handle(packet) -> None
@@ -695,10 +720,11 @@ class HeimEndpoint(object):
             elif t == 'ping-event'        : self.on_ping_event(p)
             elif t == 'send-event'        : self.on_send_event(p)
             elif t == 'snapshot-event'    : self.on_snapshot_event(p)
+            # Typeless handlers
+            self._run_handlers(None, packet)
             # Type handlers
             tp = packet.get('type')
-            for h in self.handlers.get(tp, ()):
-                h(packet)
+            if tp: self._run_handlers(tp, packet)
             # Call-backs
             cb = self.callbacks.pop(packet.get('id'), None)
             if callable(cb): cb(packet)
@@ -708,6 +734,8 @@ class HeimEndpoint(object):
         _postprocess_packet(packet) -> dict
 
         Wrap structures in packet into the corresponding wrapper classes.
+        The '_self' item of packet is set to the HeimEndpoint instance the
+        method is called on.
         Used by handle(). May or may not modify the given dict, or any of
         its members, as well as return an entirely new one, as it actually
         does.
@@ -716,7 +744,7 @@ class HeimEndpoint(object):
         tp = packet['type']
         if tp in ('get-message-reply', 'send-reply', 'edit-message-reply',
                   'edit-message-event', 'send-event'):
-            packet['data'] = self._postprocess_message(self, packet['data'])
+            packet['data'] = self._postprocess_message(packet['data'])
         elif tp == 'log-reply':
             data = packet['data']
             data['log'] = [self._postprocess_message(m) for m in data['log']]
@@ -731,6 +759,7 @@ class HeimEndpoint(object):
             data['listing'] = [self._postprocess_sessionview(e)
                                for e in data['listing']]
             data['log'] = [self._postprocess_message(m) for m in data['log']]
+        packet['_self'] = self
         return Packet(packet)
 
     def _postprocess_message(self, msg):
@@ -765,7 +794,7 @@ class HeimEndpoint(object):
         """
         on_bounce_event(packet) -> None
 
-        Built-in event packet handler. User internally for the login
+        Built-in event packet handler. Used internally for the login
         procedure.
         """
         if ('passcode' in packet.data.get('auth_options', ()) and
@@ -776,7 +805,7 @@ class HeimEndpoint(object):
         """
         on_disconnect_event(packet) -> None
 
-        Built-in event packet handler. User internally for the login
+        Built-in event packet handler. Used internally for the login
         procedure.
         """
         # Gah! Hardcoded messages!
@@ -843,7 +872,8 @@ class HeimEndpoint(object):
         """
         on_part_event(packet) -> None
 
-        Built-in event packet handler.
+        Built-in event packet handler. Used internally for the login
+        procedure.
         """
         pass
 
@@ -870,7 +900,75 @@ class HeimEndpoint(object):
 
         Built-in event packet handler.
         """
+        self.handle_login()
+        self._logged_in = True
+        self.set_nickname()
+
+    def _run_handlers(self, pkttype, packet):
+        """
+        _run_handlers(pkttype, packet) -> None
+
+        Run the handlers for type pkttype on packet. pkttype must be not the
+        same as the type of packet.
+        """
+        with self.lock:
+            for h in self.handlers.get(pkttype, ()):
+                h(packet)
+
+    def handle_login(self):
+        """
+        handle_login() -> None
+
+        Called when a session is initialized (but before setting the
+        nick-name, if any; after handle_connect()), or after a successful
+        re-connect. A session may not be estabilished at all.
+        """
         pass
+
+    def handle_logout(self, ok):
+        """
+        handle_logout(ok) -> None
+
+        Called when a session ends or before a re-connect; before
+        handle_close().
+        """
+        pass
+
+    def handle_single(self):
+        """
+        handle_single() -> None
+
+        Receive and process a single packet.
+        """
+        self.handle(self.recv_raw())
+
+    def handle_loop(self):
+        """
+        handle_loop() -> None
+
+        Receive packets until the connection collapses.
+        """
+        while 1: self.handle_single()
+
+    def add_handler(self, pkttype, handler):
+        """
+        add_handler(pkttype, handler) -> None
+
+        Register handler for handling packets of type pkttype.
+        """
+        with self.lock:
+            l = self.handlers.setdefault(pkttype, [])
+            if handler not in l: l.append(handler)
+
+    def remove_handler(self, handler):
+        """
+        remove_handler(handler) -> None
+
+        Remove any bindings of handler.
+        """
+        with self.lock:
+            for e in self.handlers.values():
+                e.remove(handler)
 
     def send_packet_raw(self, type, callback=None, data=None):
         """
@@ -900,7 +998,7 @@ class HeimEndpoint(object):
         the sequential ID of the packet sent.
         May raise any exception send_raw() raises.
         """
-        return send_packet_raw(_type, _callback, _data)
+        return _self.send_packet_raw(_type, _callback, _data)
 
     def set_roomname(self, room=None):
         """
@@ -923,28 +1021,28 @@ class HeimEndpoint(object):
         """
         set_nickname(nick=None) -> msgid or None
 
-        Set the nickname attribute, and send a corresponding command to the
-        server (if connected). If nick is None, send the currently configured
-        nick-name.
+        Set the nickname attribute to nick (unless nick is Ellipsis), and
+        send a corresponding command to the server (if connected, and
+        nickname is non-None).
         Returns the sequential message ID if a command was sent.
         """
         with self.lock:
-            if nick is not None: self.nickname = nick
+            if nick is not Ellipsis: self.nickname = nick
             if (self.get_connection() is not None and
                     self.nickname is not None):
                 return self.send_packet('nick', name=self.nickname)
 
-    def set_passcode(self, code=None):
+    def set_passcode(self, code=Ellipsis):
         """
-        set_passcode(code=None) -> msgid or None
+        set_passcode(code=Ellipsis) -> msgid or None
 
-        Set the passcode attribute, and send a corresponding command to the
-        server (if connected). If code is None, send the currently configured
-        passcode.
+        Set the passcode attribute to code (unless code is Ellipsis), and
+        send a corresponding command to the server (if connected, and
+        passcode is non-None).
         Returns the sequential message ID if a command was sent.
         """
         with self.lock:
-            if code is not None: self.passcode = code
+            if code is not Ellipsis: self.passcode = code
             if (self.get_connectin() is not None and
                     self.passcode is not None):
                 return self.send_packet('auth', type='passcode',
