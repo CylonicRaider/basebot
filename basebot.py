@@ -389,9 +389,14 @@ class HeimEndpoint(object):
     """
     HeimEndpoint(**config) -> new instance
 
-    Endpoint for the Heim protocol. Provides methods to submit commands,
-    as well as call-back methods for incoming replies/events. Re-connects
-    are handled transparently.
+    Endpoint for the Heim protocol. Provides state about this endpoint and
+    the connection, methods to submit commands, as well as call-back methods
+    for some incoming replies/events, and dynamic handlers for arbitrary
+    incoming packets. Re-connects are handled transparently.
+    Event handlers are (indirectly) called from the input loop, and should
+    therefore finish quickly, or offload the work to a separate thread.
+    Mind that the Heim server will kick any clients unreponsive for too
+    long times!
 
     Attributes (assignable by keyword arguments):
     url_template: Template to construct URLs from. Its format() method
@@ -410,13 +415,24 @@ class HeimEndpoint(object):
     retry_count : Amount of re-connection attempts until an operation (a
                   connect or a send) fails.
     retry_delay : Amount of seconds to wait before a re-connection attempt.
+    handlers    : Packet-type-to-iterable-of-callables mapping storing
+                  handlers handlers for incoming packets.
+                  While commands and replies should be handled by the
+                  call-back mechanism, built-in handler methods (on_*();
+                  not in the mapping) are present for the asynchronous
+                  events.
 
     Access to the attributes should be serialized using the instance lock
     (available in the lock attribute). The __enter__ and __exit__ methods
     of the lock are exposed, so "with self:" can be used instead of "with
-    self.lock:".
+    self.lock:". For convenience, packet handlers are called in a such
+    context; if sections explicitly need not to be protected, manual calls
+    to self.lock.release() and self.lock.acquire() become necessary.
 
     Other attributes (not assignable by keyword arguments):
+    cmdid       : ID of the next command packet to be sent. Used internally.
+    callbacks   : Mapping of command ID-s to callables; used to implement
+                  reply callbacks. Invoked after generic handlers.
     lock        : Attribute access lock. Must be acquired whenever an
                   attribute is changed, or when multiple accesses to an
                   attribute should be atomic.
@@ -434,6 +450,9 @@ class HeimEndpoint(object):
         self.passcode = config.get('passcode', None)
         self.retry_count = config.get('retry_count', 4)
         self.retry_delay = config.get('retry_delay', 10)
+        self.handlers = config.get('handlers', {})
+        self.cmdid = 0
+        self.callbacks = {}
         self.lock = threading.RLock()
         # Actual connection.
         self._connection = None
@@ -630,8 +649,7 @@ class HeimEndpoint(object):
 
         Receive and process a single packet.
         """
-        packet = self.recv_raw()
-        self.process_incoming(packet)
+        self.handle(self.recv_raw())
 
     def receive_loop(self):
         """
@@ -641,10 +659,240 @@ class HeimEndpoint(object):
         """
         while 1: self.receive_single()
 
-    def process_incoming(self, packet):
+    def handle(self, packet):
         """
-        process_incoming(packet) -> None
+        handle(packet) -> None
 
-        Process a single packet.
+        Handle a single packet.
+        After wrapping structures in the reply into the corresponding
+        record classes, handle_any(), built-in handlers, generic type
+        handlers, and call-backs are invoked (in that order).
+        """
+        try:
+            packet = self._postprocess_packet(packet)
+        except KeyError:
+            pass
+        with self.lock:
+            # Global handler.
+            self.handle_any(packet)
+            # Built-in handlers
+            p, t = packet, packet.get('type')
+            if   t == 'bounce-event'      : self.on_bounce_event(p)
+            elif t == 'disconnect-event'  : self.on_disconnect_event(p)
+            elif t == 'edit-message-event': self.on_edit_message_event(p)
+            elif t == 'hello-event'       : self.on_hello_event(p)
+            elif t == 'join-event'        : self.on_join_event(p)
+            elif t == 'login-event'       : self.on_login_event(p)
+            elif t == 'logout-event'      : self.on_logout_event(p)
+            elif t == 'network-event'     : self.on_network_event(p)
+            elif t == 'nick-event'        : self.on_nick_event(p)
+            elif t == 'part-event'        : self.on_part_event(p)
+            elif t == 'ping-event'        : self.on_ping_event(p)
+            elif t == 'send-event'        : self.on_send_event(p)
+            snapshot-event
+            # Type handlers
+            tp = packet.get('type')
+            for h in self.handlers.get(tp, ()):
+                h(packet)
+            # Call-backs
+            cb = self.callbacks.pop(packet.get('id'), None)
+            if callable(cb): cb(packet)
+
+    def _postprocess_packet(self, packet):
+        """
+        _postprocess_packet(packet) -> dict
+
+        Wrap structures in packet into the corresponding wrapper classes.
+        Used by handle(). May or may not modify the given dict, or any of
+        its members, as well as return an entirely new one, as it actually
+        does.
+        May raise a KeyError if the packet is missing required fields.
+        """
+        tp = packet['type']
+        if tp in ('get-message-reply', 'send-reply', 'edit-message-reply',
+                  'edit-message-event', 'send-event'):
+            packet['data'] = self._postprocess_message(self, packet['data'])
+        elif tp == 'log-reply':
+            data = packet['data']
+            data['log'] = [self._postprocess_message(m) for m in data['log']]
+        elif tp == 'who-reply':
+            packet['data'] = [SessionView(e) for e in packet['data']]
+        elif tp == 'hello-event':
+            data = packet['data']
+            data['session'] = SessionView(data['session'])
+            # TODO: account -> PersonalAccountView
+        elif tp == 'snapshot-event':
+            data = packet['data']
+            data['listing'] = [self._postprocess_sessionview(e)
+                               for e in data['listing']]
+            data['log'] = [self._postprocess_message(m) for m in data['log']]
+        return Packet(packet)
+
+    def _postprocess_message(self, msg):
+        """
+        _postprocess_message(msg) -> dict
+
+        Wrap a Message structure into the corresponding wrapper class.
+        Used by _postpocess_packet().
+        """
+        msg['sender'] = self._postprocess_sessionview(msg['sender'])
+        return Message(msg)
+
+    def _postprocess_sessionview(self, view):
+        """
+        _postprocess_sessionview(view) -> dict
+
+        Wrap a SessionView structure into the corresponding wrapper class.
+        Used by _postpocess_packet().
+        """
+        return SessionView(view)
+
+    def handle_any(self, packet):
+        """
+        handle_any(packet) -> None
+
+        Handle a single post-processed packet.
+        Can be used as a catch-all handler; called by handle().
         """
         pass
+
+    def on_bounce_event(self, packet):
+        """
+        on_bounce_event(packet) -> None
+
+        Built-in event packet handler. User internally for the login
+        procedure.
+        """
+        if ('passcode' in packet.data.get('auth_options', ()) and
+                self.passcode is not None):
+            pass # TODO: set_passcode().
+
+    def on_disconnect_event(self, packet):
+        """
+        on_disconnect_event(packet) -> None
+
+        Built-in event packet handler. User internally for the login
+        procedure.
+        """
+        # Gah! Hardcoded messages!
+        if packet.get('reason') == 'authentication changed':
+            self.reconnect()
+
+    def on_hello_event(self, packet):
+        """
+        on_hello_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_join_event(self, packet):
+        """
+        on_join_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_login_event(self, packet):
+        """
+        on_login_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_logout_event(self, packet):
+        """
+        on_logout_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_network_event(self, packet):
+        """
+        on_network_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_nick_event(self, packet):
+        """
+        on_nick_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_edit_message_event(self, packet):
+        """
+        on_edit_message_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_part_event(self, packet):
+        """
+        on_part_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_ping_event(self, packet):
+        """
+        on_ping_event(packet) -> None
+
+        Handle a ping-event with a ping-reply.
+        The only client-side reply required by the protocol.
+        """
+        self.send_packet('ping-reply', time=packet.get('time'))
+
+    def on_send_event(self, packet):
+        """
+        on_send_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def on_snapshot_event(self, packet):
+        """
+        on_snapshot_event(pcket) -> None
+
+        Built-in event packet handler.
+        """
+        pass
+
+    def send_packet_raw(self, type, callback=None, data=None):
+        """
+        send_packet_raw(type, callback, data) -> str
+
+        Send a packet to the server.
+        Differently to send_packet(), keyword arguments are not used,
+        and arbitrary data can therefore be specified. Returns the
+        serial ID of the packet sent.
+        """
+        with self.lock:
+            cmdid = str(self.cmdid)
+            self.cmdid += 1
+        pkt = {'type': type, 'id': cmdid}
+        if data is not None: pkt['data'] = data
+        self.send_raw(pkt)
+        return cmdid
+
+    def send_packet(_self, _type, _callback=None, **_data):
+        """
+        send_packet(_type, _callback=None, **_data) -> str
+
+        Send a packet to the server.
+        The packet type is specified as a positional argument, an optional
+        callback for handling the server's reply may be specified as well;
+        the payload of the packet is passed as keyword arguments. Returns
+        the sequential ID of the packet sent.
+        May raise any exception send_raw() raises.
+        """
+        return send_packet_raw(_type, _callback, _data)
