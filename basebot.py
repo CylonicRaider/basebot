@@ -397,6 +397,8 @@ class HeimEndpoint(object):
     therefore finish quickly, or offload the work to a separate thread.
     Mind that the Heim server will kick any clients unreponsive for too
     long times!
+    While account-related event handlers are present, actual support for
+    accounts is lacking, and has to be implemented manually.
 
     Attributes (assignable by keyword arguments):
     url_template: Template to construct URLs from. Its format() method
@@ -428,6 +430,9 @@ class HeimEndpoint(object):
     self.lock:". For convenience, packet handlers are called in a such
     context; if sections explicitly need not to be protected, manual calls
     to self.lock.release() and self.lock.acquire() become necessary.
+    Note that, to actually take effect, changes to the roomname, nickname
+    and passcode attributes must be peformed by using the corresponding
+    set_*() methods (or by performing the necessary actions oneself).
 
     Other attributes (not assignable by keyword arguments):
     cmdid       : ID of the next command packet to be sent. Used internally.
@@ -689,7 +694,7 @@ class HeimEndpoint(object):
             elif t == 'part-event'        : self.on_part_event(p)
             elif t == 'ping-event'        : self.on_ping_event(p)
             elif t == 'send-event'        : self.on_send_event(p)
-            snapshot-event
+            elif t == 'snapshot-event'    : self.on_snapshot_event(p)
             # Type handlers
             tp = packet.get('type')
             for h in self.handlers.get(tp, ()):
@@ -765,7 +770,7 @@ class HeimEndpoint(object):
         """
         if ('passcode' in packet.data.get('auth_options', ()) and
                 self.passcode is not None):
-            pass # TODO: set_passcode().
+            self.set_passcode()
 
     def on_disconnect_event(self, packet):
         """
@@ -780,7 +785,7 @@ class HeimEndpoint(object):
 
     def on_hello_event(self, packet):
         """
-        on_hello_event(pcket) -> None
+        on_hello_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -788,7 +793,7 @@ class HeimEndpoint(object):
 
     def on_join_event(self, packet):
         """
-        on_join_event(pcket) -> None
+        on_join_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -796,7 +801,7 @@ class HeimEndpoint(object):
 
     def on_login_event(self, packet):
         """
-        on_login_event(pcket) -> None
+        on_login_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -804,7 +809,7 @@ class HeimEndpoint(object):
 
     def on_logout_event(self, packet):
         """
-        on_logout_event(pcket) -> None
+        on_logout_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -812,7 +817,7 @@ class HeimEndpoint(object):
 
     def on_network_event(self, packet):
         """
-        on_network_event(pcket) -> None
+        on_network_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -820,7 +825,7 @@ class HeimEndpoint(object):
 
     def on_nick_event(self, packet):
         """
-        on_nick_event(pcket) -> None
+        on_nick_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -828,7 +833,7 @@ class HeimEndpoint(object):
 
     def on_edit_message_event(self, packet):
         """
-        on_edit_message_event(pcket) -> None
+        on_edit_message_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -836,7 +841,7 @@ class HeimEndpoint(object):
 
     def on_part_event(self, packet):
         """
-        on_part_event(pcket) -> None
+        on_part_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -853,7 +858,7 @@ class HeimEndpoint(object):
 
     def on_send_event(self, packet):
         """
-        on_send_event(pcket) -> None
+        on_send_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -861,7 +866,7 @@ class HeimEndpoint(object):
 
     def on_snapshot_event(self, packet):
         """
-        on_snapshot_event(pcket) -> None
+        on_snapshot_event(packet) -> None
 
         Built-in event packet handler.
         """
@@ -896,3 +901,51 @@ class HeimEndpoint(object):
         May raise any exception send_raw() raises.
         """
         return send_packet_raw(_type, _callback, _data)
+
+    def set_roomname(self, room=None):
+        """
+        set_roomname(room=None) -> None
+
+        Set the roomname attribute, and (as a "side effect") connect to
+        that room (if already connected). If room is None, perform no
+        action.
+        """
+        if room is None: return
+        with self.lock:
+            self.roomname = room
+            if self.get_connection() is not None:
+                reconn = True
+            else:
+                reconn = False
+        if reconn: self.reconnect()
+
+    def set_nickname(self, nick=None):
+        """
+        set_nickname(nick=None) -> msgid or None
+
+        Set the nickname attribute, and send a corresponding command to the
+        server (if connected). If nick is None, send the currently configured
+        nick-name.
+        Returns the sequential message ID if a command was sent.
+        """
+        with self.lock:
+            if nick is not None: self.nickname = nick
+            if (self.get_connection() is not None and
+                    self.nickname is not None):
+                return self.send_packet('nick', name=self.nickname)
+
+    def set_passcode(self, code=None):
+        """
+        set_passcode(code=None) -> msgid or None
+
+        Set the passcode attribute, and send a corresponding command to the
+        server (if connected). If code is None, send the currently configured
+        passcode.
+        Returns the sequential message ID if a command was sent.
+        """
+        with self.lock:
+            if code is not None: self.passcode = code
+            if (self.get_connectin() is not None and
+                    self.passcode is not None):
+                return self.send_packet('auth', type='passcode',
+                                        passcode=self.passcode)
