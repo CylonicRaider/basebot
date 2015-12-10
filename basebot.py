@@ -68,13 +68,11 @@ def format_datetime(timestamp, fractions=True):
     """
     format_datetime(timestamp, fractions=True) -> str
 
-    Produces a string representation of the timestamp similar to
-    the ISO 8601 format: "YYYY-MM-DD HH:MM:SS.FFF UTC". If fractions
-    is false, the ".FFF" part is omitted. As the platform the bots
-    are used on is international, there is little point to use any kind
-    of timezone but UTC.
-
-    See also: format_delta()
+    Produces a string representation of the timestamp similar to the
+    ISO 8601 format: "YYYY-MM-DD HH:MM:SS.FFF UTC". If fractions is false,
+    the ".FFF" part is omitted. As the platform the bots are used on is
+    international, there is little point to use any kind of timezone but
+    UTC.
     """
     ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(timestamp))
     if fractions: ts += '.%03d' % (int(timestamp * 1000) % 1000)
@@ -91,8 +89,6 @@ def format_delta(delta, fractions=True):
     integer, the fractional part is omitted. All components are included as
     needed, so the result for 3600 would be "1h". As a special case, the
     result for 0 is "0s" (instead of nothing).
-
-    See also: format_datetime()
     """
     if not fractions:
         delta = int(delta)
@@ -442,7 +438,11 @@ class UserList(object):
         """
         with self._lock:
             for i in lst:
-                if i.session_id in self._by_session_id: continue
+                if i.session_id in self._by_session_id:
+                    orig = self._by_session_id.pop(i.session_id)
+                    self._list.remove(orig)
+                    self._by_agent_id[orig.id].remove(orig)
+                    self._by_name[orig.name].remove(orig)
                 self._list.append(i)
                 self._by_session_id[i.session_id] = i
                 self._by_agent_id.setdefault(i.id, []).append(i)
@@ -458,27 +458,38 @@ class UserList(object):
         with self._lock:
             for i in lst:
                 try:
-                    self._list.remove(self._by_session_id.pop(i.session_id))
-                except (KeyError, ValueError):
-                    pass
-                try:
-                    self._by_agent_id.get(i.id, []).remove(i)
-                pass ValueError:
-                    pass
-                try:
-                    self._by_name.get(i.name, []).remove(i)
-                except ValueError:
-                    pass
+                    orig = self._by_session_id.pop(i.session_id)
+                except KeyError:
+                    continue
+                self._list.remove(orig)
+                self._by_agent_id.get(orig.id, []).remove(orig)
+                self._by_name.get(orig.name, []).remove(orig)
 
-    def update(self, *lst):
+    def remove_matching(self, pattern):
         """
-        update(*lst) -> None
+        remove_matching(pattern) -> None
 
-        Remove and re-insert all the entries in lst.
+        Remove all the SessionView-s from self where all the items present
+        in pattern equal to the corresponding ones in the element; i.e.,
+        a pattern of {'name': 'test'} will remove all entries with a 'name'
+        value of 'test'. An empty pattern will remove all users.
+        Used to implement the partition network-event.
         """
         with self._lock:
-            self.remove(*lst)
-            self.add(*lst)
+            if not pattern:
+                self.clear()
+                return
+            rml, it = [], pattern.items()
+            for i in self._list:
+                for k, v in it:
+                    try:
+                        if i[k] != v:
+                            break
+                    except KeyError:
+                        break
+                else:
+                    rml.append(i)
+            self.remove(*rml)
 
     def clear(self):
         """
@@ -548,6 +559,8 @@ class MessageTree(object):
         """
         self._messages = {}
         self._children = {}
+        self._earliest = None
+        self._latest = None
         self._lock = threading.RLock()
 
     def __iter__(self):
@@ -578,6 +591,10 @@ class MessageTree(object):
                 self._messages[msg.id] = msg
                 c = self._children.setdefault(msg.parent, [])
                 if msg.id not in c: c.append(msg.id)
+                if self._earliest is None or self._earliest.id > msg.id:
+                    self._earliest = msg
+                if self._latest is None or self._latest.id <= msg.id:
+                    self._latest = msg
                 sorts.add(c)
             for l in sorts:
                 l.sort(key=lambda m: m.id)
@@ -591,6 +608,26 @@ class MessageTree(object):
         with self._lock:
             self._messages.clear()
             self._children.clear()
+            self._earliest = None
+            self._latest = None
+
+    def earliest(self):
+        """
+        earliest() -> Message
+
+        Return the earliest message in self, or None of none.
+        """
+        with self._lock:
+            return self._earliest
+
+    def latest(self):
+        """
+        latest() -> Message
+
+        Return the latest message in self, or None of none.
+        """
+        with self._lock:
+            return self._latest
 
     def get(self, id):
         """
@@ -686,6 +723,8 @@ class HeimEndpoint(object):
     cmdid       : ID of the next command packet to be sent. Used internally.
     callbacks   : Mapping of command ID-s to callables; used to implement
                   reply callbacks. Invoked after generic handlers.
+    eff_nickname: The nick-name as the server returned it. May differ from
+                  the one sent (truncation etc.).
     lock        : Attribute access lock. Must be acquired whenever an
                   attribute is changed, or when multiple accesses to an
                   attribute should be atomic.
@@ -706,6 +745,7 @@ class HeimEndpoint(object):
         self.handlers = config.get('handlers', {})
         self.cmdid = 0
         self.callbacks = {}
+        self.eff_nickname = None
         self.lock = threading.RLock()
         # Actual connection.
         self._connection = None
@@ -959,6 +999,8 @@ class HeimEndpoint(object):
             elif t == 'ping-event'        : self.on_ping_event(p)
             elif t == 'send-event'        : self.on_send_event(p)
             elif t == 'snapshot-event'    : self.on_snapshot_event(p)
+            # Special built-in handler.
+            if i is not None and t.endswith('-reply'): self.handle_reply(p)
             # Typeless handlers
             self._run_handlers(None, packet)
             # Type handlers
@@ -988,11 +1030,14 @@ class HeimEndpoint(object):
             data = packet['data']
             data['log'] = [self._postprocess_message(m) for m in data['log']]
         elif tp == 'who-reply':
-            packet['data'] = [SessionView(e) for e in packet['data']]
+            packet['data'] = [self._postprocess_sessionview(e)
+                              for e in packet['data']]
         elif tp == 'hello-event':
             data = packet['data']
-            data['session'] = SessionView(data['session'])
+            data['session'] = self._postprocess_sessionview(data['session'])
             # TODO: account -> PersonalAccountView
+        elif tp in ('join-event', 'part-event'):
+            packet['data'] = self._postprocess_sessionview(packet['data'])
         elif tp == 'snapshot-event':
             data = packet['data']
             data['listing'] = [self._postprocess_sessionview(e)
@@ -1028,6 +1073,17 @@ class HeimEndpoint(object):
         Can be used as a catch-all handler; called by handle().
         """
         pass
+
+    def handle_reply(self, packet):
+        """
+        handle_reply(packet) -> None
+
+        Handle an arbitrary command reply.
+        Useful for checking command replies non-specifically. Called by
+        handle().
+        """
+        if packet.type == 'nick-reply':
+            self.eff_nickname = packet.to
 
     def on_bounce_event(self, packet):
         """
@@ -1209,6 +1265,19 @@ class HeimEndpoint(object):
             for e in self.handlers.values():
                 e.remove(handler)
 
+    def set_callback(self, id, cb):
+        """
+        set_callback(id, cb) -> None
+
+        Set the callback for the given message ID. Override the previously
+        set one, or, if cb is None, remove it.
+        """
+        with self.lock:
+            if cb is None:
+                self.callbacks.pop(id, None)
+            else:
+                self.callbacks[id] = cb
+
     def send_packet_raw(self, type, callback=None, data=None):
         """
         send_packet_raw(type, callback, data) -> str
@@ -1221,6 +1290,8 @@ class HeimEndpoint(object):
         with self.lock:
             cmdid = str(self.cmdid)
             self.cmdid += 1
+            if callback is not None:
+                self.callbacks[cmdid] = callback
         pkt = {'type': type, 'id': cmdid}
         if data is not None: pkt['data'] = data
         self.send_raw(pkt)
@@ -1266,6 +1337,7 @@ class HeimEndpoint(object):
         Returns the sequential message ID if a command was sent.
         """
         with self.lock:
+            # Ellipsis FTW!
             if nick is not Ellipsis: self.nickname = nick
             if (self.get_connection() is not None and
                     self.nickname is not None):
@@ -1295,10 +1367,13 @@ class LoggingEndpoint(HeimEndpoint):
     See HeimEndpoint on configuration details.
 
     Additional attributes (configurable through keyword arguments):
-    log_users   : Maintain a user list (if false, it will be empty;
-                  defaults to False).
-    log_messages: Maintain a chat log (if false, it will be empty;
-                  defaults to False).
+    log_users   : Maintain a user list (if false, it will be empty; defaults
+                  to False).
+    log_messages: Maintain a chat log (if false, it will be empty; defaults
+                  to False).
+
+    If log_users or log_messages are changed during operation, the values in
+    the corresponding list (see below) cannot be relied upon.
 
     ...More additional attributes:
     users   : A UserList, holding the current user list (or nothing).
@@ -1307,8 +1382,68 @@ class LoggingEndpoint(HeimEndpoint):
     """
 
     def __init__(self, **config):
+        "Constructor. See class docstring for details."
         HeimEndpoint.__init__(self, **config)
         self.log_users = config.get('log_users', False)
         self.log_messages = config.get('log_messages', False)
         self.users = UserList()
         self.messages = MessageTree()
+
+    def handle_close(self, ok):
+        "See HeimEndpoint.handle_close() for details."
+        HeimEndpoint.handle_close(self, ok)
+        self.users.clear()
+        self.messages.clear()
+
+    def handle_any(self, packet):
+        "See HeimEndpoint.handle_any() for details."
+        HeimEndpoint.handle_any(self, packet)
+        if self.log_users:
+            if packet.type == 'who-reply':
+                self.users.add(*packet.data)
+            elif packet.type == 'snapshot-event':
+                self.users.add(*packet.data['listing'])
+            elif packet.type == 'network-event':
+                if packet.data['type'] == 'partition':
+                    self.users.remove_matching({
+                        'server_id': packet.data['server_id'],
+                        'server_era': packet.data['server_era']})
+            elif packet.type == 'nick-event':
+                usr = self.users.for_session_id(packet.data['session_id'])
+                usr.name = packet.data['to']
+            elif packet.type == 'join-event':
+                self.users.add(packet.data)
+            elif packet.type == 'part-event':
+                self.users.remove(packet.data)
+        if self.log_messages:
+            if packet.type in ('get-message-reply', 'send-reply',
+                               'edit-message-reply', 'edit-message-event',
+                               'send-event'):
+                self.messages.add(packet.data)
+            elif packet.type == 'log-reply':
+                self.messages.add(*packet.data['log'])
+
+    def refresh_users(self):
+        """
+        refresh_users() -> None
+
+        Clear the user list, and send a request to re-fill it.
+        Note that the actual user list update will happen asynchronously.
+        Returns the ID of the packet sent.
+        """
+        with self.lock:
+            self.users.clear()
+            return self.send_packet('who')
+
+    def refresh_logs(self, n=100):
+        """
+        refresh_logs(n=100) -> None
+
+        Clear the message logs, and send a request to re-fill them
+        (partially). n is the amount of messages to request.
+        Note that the actual logs update will happen asynchronously.
+        Returns the ID of the packet sent.
+        """
+        with self.lock:
+            self.messages.clear()
+            return self.send_packet('log', n=n)
