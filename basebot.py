@@ -275,16 +275,28 @@ class Packet(Record):
     _exports_ = ('id', 'type', 'data', 'error', 'throttled',
                  'throttled_reason')
 
-## Currently unused.
-#class AccountView(Record):
-#    """
-#    AccountView describes an account and its preferred names.
-#
-#    Attributes:
-#    id  : the id of the account
-#    name: the name that the holder of the account goes by
-#    """
-#    _exports_ = ('id', 'name')
+class AccountView(Record):
+    """
+    AccountView describes an account and its preferred names.
+
+    Attributes:
+    id  : the id of the account
+    name: the name that the holder of the account goes by
+    """
+    _exports_ = ('id', 'name')
+
+# Documented by word-of-mouth.
+class PersonalAccountView(AccountView):
+    """
+    PersonalAccountView is an AccountView with an additional Email field.
+
+    Attributes:
+    email: the email of the account
+    id   : the id of the account
+    name : the name that the holder of the account goes by
+    """
+    # Overrides parent class value.
+    _exports_ = ('email', 'id', 'name')
 
 class Message(Record):
     """
@@ -716,8 +728,9 @@ class HeimEndpoint(object):
     Note that, to actually take effect, changes to the roomname, nickname
     and passcode attributes must be peformed by using the corresponding
     set_*() methods (or by performing the necessary actions oneself).
-    Remember to call the parent class' methods as well, because some of its
-    interna are implemented there!
+
+    *Remember to call the parent class' methods, as some of its interna are
+    implemented there!*
 
     Other attributes (not assignable by keyword arguments):
     cmdid       : ID of the next command packet to be sent. Used internally.
@@ -725,6 +738,7 @@ class HeimEndpoint(object):
                   reply callbacks. Invoked after generic handlers.
     eff_nickname: The nick-name as the server returned it. May differ from
                   the one sent (truncation etc.).
+    session_id  : Own session ID, or None if not connected.
     lock        : Attribute access lock. Must be acquired whenever an
                   attribute is changed, or when multiple accesses to an
                   attribute should be atomic.
@@ -746,6 +760,7 @@ class HeimEndpoint(object):
         self.cmdid = 0
         self.callbacks = {}
         self.eff_nickname = None
+        self.session_id = None
         self.lock = threading.RLock()
         # Actual connection.
         self._connection = None
@@ -932,7 +947,8 @@ class HeimEndpoint(object):
         The ok parameter tells whether the close was normal (ok is true)
         or abnormal (ok is false).
         """
-        pass
+        self.eff_nickname = None
+        self.session_id = None
 
     def recv_raw(self, retry=True):
         """
@@ -1034,8 +1050,9 @@ class HeimEndpoint(object):
                               for e in packet['data']]
         elif tp == 'hello-event':
             data = packet['data']
+            data['account'] = self._postprocess_personalaccountview(
+                data['account'])
             data['session'] = self._postprocess_sessionview(data['session'])
-            # TODO: account -> PersonalAccountView
         elif tp in ('join-event', 'part-event'):
             packet['data'] = self._postprocess_sessionview(packet['data'])
         elif tp == 'snapshot-event':
@@ -1064,6 +1081,16 @@ class HeimEndpoint(object):
         Used by _postpocess_packet().
         """
         return SessionView(view)
+
+    def _postprocess_personalaccountview(self, view):
+        """
+        _postprocess_personalaccountview(view) -> dict
+
+        Wrap a PersonalAccountView structure into the corresponding wrapper
+        class.
+        Used by _postprocess_packet().
+        """
+        return PersonalAccountView(view)
 
     def handle_any(self, packet):
         """
@@ -1113,7 +1140,9 @@ class HeimEndpoint(object):
 
         Built-in event packet handler.
         """
-        pass
+        # Not mentioned in the API docs (last time I checked), but this
+        # packet is the *very* first one the server sends.
+        self.session_id = packet.session.session_id
 
     def on_join_event(self, packet):
         """
@@ -1416,12 +1445,57 @@ class LoggingEndpoint(HeimEndpoint):
             elif packet.type == 'part-event':
                 self.users.remove(packet.data)
         if self.log_messages:
-            if packet.type in ('get-message-reply', 'send-reply',
-                               'edit-message-reply', 'edit-message-event',
-                               'send-event'):
+            if packet.type in ('edit-message-reply', 'send-reply',
+                               'edit-message-event', 'send-event'):
                 self.messages.add(packet.data)
+                self.handle_chat(packet, {
+                    'own': packet.type.endswith('-reply'),
+                    'edit': packet.type.startswith('send-'),
+                    'long': False})
+            elif packet.type == 'get-message-reply':
+                self.messages.add(packet.data)
+                sid = packet.data.sender.session_id
+                self.handle_got_message(packet.data, {
+                    'own': (sid == self.session_id),
+                    'edit': False, 'long': True})
             elif packet.type == 'log-reply':
                 self.messages.add(*packet.data['log'])
+                self.handle_logs(packet.data['log'],
+                                 {'snapshot': False})
+            elif packet.type == 'snapshot-event':
+                self.messages.add(*packet.data['log'])
+                self.handle_logs(packet.data['log'],
+                                 {'snapshot': True})
+
+    def handle_chat(self, msg, msgtype):
+        """
+        handle_chat(msg, msgtype) -> None
+
+        Invoked for every "live" chat message received.
+        msg is the Message being dealt with; msgtype is a dict storing
+        certain properties of the message:
+        own : Whether the message is an own message (either from a command
+              reply, or (in case of get-message) from the same session ID
+              as the current one).
+        edit: Whether the message comes from an edit-event or -reply (i.e.,
+              whether the messages was edited post factum).
+        long: Whether the message comes from a get-message-reply and has
+              the entire (possibly long) content in it (check the truncated
+              member of the message, just to be sure).
+        """
+        pass
+
+    def handle_logs(self, msglist, type):
+        """
+        handle_logs(self, msglist, type) -> None
+
+        Invoked for every piece of past chat logs received.
+        msglist is a list of Message-s; msgtype is a dict containing
+        meta-information:
+        snapshot: Whether the messages came from a snapshot-event (whichever
+                  use one might have from that).
+        """
+        pass
 
     def refresh_users(self):
         """
