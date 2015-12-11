@@ -6,6 +6,7 @@ Bot library for euphoria.io.
 Important functions and classes:
 normalize_nick() : Normalize a nick (remove whitespace and convert it to
                    lower case). Useful for comparison of @-mentions.
+parse_command()  : Split a string by whitespace and return a Token list.
 format_datetime(): Format a UNIX timestamp nicely.
 format_delta()   : Format a timestamp difference nicely.
 
@@ -15,8 +16,9 @@ SessionView      : Representing a single session.
 
 HeimEndpoint     : A bare-bones implementation of the API; useful for
                    minimalistic clients, or alternative expansion.
-LoggingEndpoint  : HeimEndpoint maintaining a user list and chat logs
-                   on demand.
+LoggingEndpoint  : HeimEndpoint maintaining a user list and chat logs on
+                   demand.
+BaseBot          : LoggingEndpoint supporting in-chat commands.
 """
 
 # ---------------------------------------------------------------------------
@@ -63,6 +65,41 @@ def normalize_nick(nick):
     normalizations on it.
     """
     return WHITESPACE_RE.sub('', nick).lower()
+
+def scan_mentions(line):
+    """
+    scan_mentions(line) -> list
+
+    Scan the given message for @-mentions and return them as a list of Token
+    instances (in order).
+    """
+    ret, offset, l = [], 0, len(line)
+    while offset < l:
+        m = MENTION_RE.search(line, offset)
+        if not m: break
+        ret.append(Token(m.group(), m.start()))
+        offset = m.end()
+    return ret
+
+def parse_command(line):
+    """
+    parse_command(line) -> list
+
+    Parse a single-string command line into a list of Token-s (separated by
+    whitespace in the original string).
+    """
+    ret, offset, l = [], 0, len(line)
+    while offset < l:
+        wm = WHITESPACE_RE.search(line, offset)
+        if not wm:
+            ret.append(Token(line[offset:], offset))
+            break
+        elif wm.start() == offset:
+            offset = wm.end()
+            continue
+        ret.append(Token(line[offset:wm.start()], offset))
+        offset = wm.end()
+    return ret
 
 def format_datetime(timestamp, fractions=True):
     """
@@ -112,6 +149,23 @@ def format_delta(delta, fractions=True):
         else:
             ret.append('%ds' % delta)
     return ' '.join(ret)
+
+class Token(str):
+    """
+    Token(obj, offset) -> new instance
+
+    A string that is at a certain offset inside some other string. The offset
+    if exposed as an attribute.
+    """
+
+    def __new__(cls, obj, offset):
+        inst = str.__new__(cls, obj)
+        inst.offset = offset
+        return inst
+
+    def __repr__(self):
+        return '%s(%s, %r)' % (self.__class__.__name__, str.__repr__(self),
+                               self.offset)
 
 class Record(dict):
     """
@@ -188,11 +242,7 @@ class JSONWebSocket:
     """
 
     def __init__(self, ws):
-        """
-        __init__(ws) -> None
-
-        Initializer. See class docstring for invocation details.
-        """
+        "Initializer. See class docstring for invocation details."
         self.ws = ws
         self.rlock = threading.RLock()
         self.wlock = threading.RLock()
@@ -292,8 +342,8 @@ class PersonalAccountView(AccountView):
 
     Attributes:
     email: the email of the account
-    id   : the id of the account
-    name : the name that the holder of the account goes by
+    id   : the id of the account (inherited)
+    name : the name that the holder of the account goes by (inherited)
     """
     # Overrides parent class value.
     _exports_ = ('email', 'id', 'name')
@@ -325,8 +375,8 @@ class Message(Record):
     All optional attributes default to None.
 
     Additional read-only properties:
-    mention_list: Tuple of (offset, string) pairs listing all the @-mentions
-                  in the message (including the @ signs).
+    mention_list: Tuple of Token instances listing all the @-mentions in the
+                  message (including the @ signs).
     mention_set : frozenset of names @-mentioned in the message (excluding
                   the @ signs).
     """
@@ -354,21 +404,14 @@ class Message(Record):
     def mention_list(self):
         with self.__lock:
             if self.__mention_list is None:
-                l, s, o = [], self.content, 0
-                ls = len(s)
-                while o < ls:
-                    m = MENTION_RE.search(s, o)
-                    if not m: break
-                    l.append((m.start(), m.group()))
-                    o = m.end()
-                self.__mention_list = tuple(l)
+                self.__mention_list = tuple(scan_mentions(self.content))
             return self.__mention_list
 
     @property
     def mention_set(self):
         with self.__lock:
             if self.__mention_set is None:
-                self.__mention_set = frozenset(i[1][1:]
+                self.__mention_set = frozenset(i[1:]
                     for i in self.__mention_list)
             return self.__mention_set
 
@@ -423,11 +466,7 @@ class UserList(object):
     """
 
     def __init__(self):
-        """
-        __init__() -> None
-
-        Constructor. See class docstring for usage.
-        """
+        "Initializer. See class docstring for invocation details."
         self._list = []
         self._by_session_id = {}
         self._by_agent_id = {}
@@ -564,11 +603,7 @@ class MessageTree(object):
     """
 
     def __init__(self):
-        """
-        __init__() -> None
-
-        Constructor. See class docstring for usage.
-        """
+        "Initializer. See class docstring for invocation details."
         self._messages = {}
         self._children = {}
         self._earliest = None
@@ -706,7 +741,7 @@ class HeimEndpoint(object):
                   instance that received the packet.
                   Handlers for the (virtual) packet type None (i.e. the None
                   singleton) are called for *any* packet, similarly to
-                  handle_any() (but *after* the built-in handlers).
+                  handle_early() (but *after* the built-in handlers).
                   While commands and replies should be handled by the
                   call-back mechanism, built-in handler methods (on_*();
                   not in the mapping) are present for the asynchronous
@@ -745,11 +780,7 @@ class HeimEndpoint(object):
     """
 
     def __init__(self, **config):
-        """
-        __init__(self, **config) -> None
-
-        Constructor. See class docstring for usage.
-        """
+        "Initializer. See class docstring for invocation details."
         self.url_template = config.get('url_template', URL_TEMPLATE)
         self.roomname = config.get('roomname', None)
         self.nickname = config.get('nickname', None)
@@ -990,7 +1021,7 @@ class HeimEndpoint(object):
 
         Handle a single packet.
         After wrapping structures in the reply into the corresponding
-        record classes, handle_any(), built-in handlers, generic type
+        record classes, handle_early(), built-in handlers, generic type
         handlers, and call-backs are invoked (in that order).
         """
         try:
@@ -999,7 +1030,7 @@ class HeimEndpoint(object):
             pass
         with self.lock:
             # Global handler.
-            self.handle_any(packet)
+            self.handle_early(packet)
             # Built-in handlers
             p, t = packet, packet.get('type')
             if   t == 'bounce-event'      : self.on_bounce_event(p)
@@ -1025,6 +1056,8 @@ class HeimEndpoint(object):
             # Call-backs
             cb = self.callbacks.pop(packet.get('id'), None)
             if callable(cb): cb(packet)
+            # Other global handler.
+            self.handle_any(packet)
 
     def _postprocess_packet(self, packet):
         """
@@ -1092,9 +1125,9 @@ class HeimEndpoint(object):
         """
         return PersonalAccountView(view)
 
-    def handle_any(self, packet):
+    def handle_early(self, packet):
         """
-        handle_any(packet) -> None
+        handle_early(packet) -> None
 
         Handle a single post-processed packet.
         Can be used as a catch-all handler; called by handle().
@@ -1238,6 +1271,15 @@ class HeimEndpoint(object):
         with self.lock:
             for h in self.handlers.get(pkttype, ()):
                 h(packet)
+
+    def handle_any(self, packet):
+        """
+        handle_any(packet) -> None
+
+        Handle an arbitrary packet.
+        Called by handle(), last in the handler chain.
+        """
+        pass
 
     def handle_login(self):
         """
@@ -1396,10 +1438,13 @@ class LoggingEndpoint(HeimEndpoint):
     See HeimEndpoint on configuration details.
 
     Additional attributes (configurable through keyword arguments):
-    log_users   : Maintain a user list (if false, it will be empty; defaults
-                  to False).
-    log_messages: Maintain a chat log (if false, it will be empty; defaults
-                  to False).
+    log_users    : Maintain a user list (if false, it will be empty; defaults
+                   to False).
+    log_messages : Maintain a chat log (if false, it will be empty; defaults
+                   to False).
+    chat_handlers: List of handler functions to call when new chat messages
+                   arrive. Invoked like handle_chat(); after all other
+                   handlers.
 
     If log_users or log_messages are changed during operation, the values in
     the corresponding list (see below) cannot be relied upon.
@@ -1411,10 +1456,11 @@ class LoggingEndpoint(HeimEndpoint):
     """
 
     def __init__(self, **config):
-        "Constructor. See class docstring for details."
+        "Initializer. See class docstring for invocation details."
         HeimEndpoint.__init__(self, **config)
         self.log_users = config.get('log_users', False)
         self.log_messages = config.get('log_messages', False)
+        self.chat_handlers = config.get('chat_handlers', [])
         self.users = UserList()
         self.messages = MessageTree()
 
@@ -1424,9 +1470,9 @@ class LoggingEndpoint(HeimEndpoint):
         self.users.clear()
         self.messages.clear()
 
-    def handle_any(self, packet):
-        "See HeimEndpoint.handle_any() for details."
-        HeimEndpoint.handle_any(self, packet)
+    def handle_early(self, packet):
+        "See HeimEndpoint.handle_early() for details."
+        HeimEndpoint.handle_early(self, packet)
         if self.log_users:
             if packet.type == 'who-reply':
                 self.users.add(*packet.data)
@@ -1448,32 +1494,53 @@ class LoggingEndpoint(HeimEndpoint):
             if packet.type in ('edit-message-reply', 'send-reply',
                                'edit-message-event', 'send-event'):
                 self.messages.add(packet.data)
-                self.handle_chat(packet, {
-                    'own': packet.type.endswith('-reply'),
-                    'edit': packet.type.startswith('send-'),
-                    'long': False})
             elif packet.type == 'get-message-reply':
                 self.messages.add(packet.data)
-                sid = packet.data.sender.session_id
-                self.handle_got_message(packet.data, {
-                    'own': (sid == self.session_id),
-                    'edit': False, 'long': True})
             elif packet.type == 'log-reply':
                 self.messages.add(*packet.data['log'])
-                self.handle_logs(packet.data['log'],
-                                 {'snapshot': False})
             elif packet.type == 'snapshot-event':
                 self.messages.add(*packet.data['log'])
-                self.handle_logs(packet.data['log'],
-                                 {'snapshot': True})
 
-    def handle_chat(self, msg, msgtype):
+    def handle_any(self, packet):
+        "See HeimEndpoint.handle_any() for details."
+        HeimEndpoint.handle_any(self, packet)
+        if packet.type in ('edit-message-reply', 'send-reply',
+                           'edit-message-event', 'send-event'):
+            self._run_chat_handlers(packet, {
+                'own': packet.type.endswith('-reply'),
+                'edit': packet.type.startswith('send-'),
+                'long': False,
+                'raw': packet})
+        elif packet.type == 'get-message-reply':
+            sid = packet.data.sender.session_id
+            self._run_chat_handlers(packet.data, {
+                'own': (sid == self.session_id),
+                'edit': False, 'long': True, 'raw': packet})
+        elif packet.type == 'log-reply':
+            self.handle_logs(packet.data['log'],
+                {'snapshot': False, 'raw': packet})
+        elif packet.type == 'snapshot-event':
+            self.handle_logs(packet.data['log'],
+                {'snapshot': True, 'raw': packet})
+
+    def _run_chat_handlers(self, msg, meta):
         """
-        handle_chat(msg, msgtype) -> None
+        _run_chat_handlers(msg, meta) -> None
+
+        Invoke handle_chat() and all the handlers in chat_handlers with the
+        given arguments.
+        """
+        self.handle_chat(msg, meta)
+        for h in self.chat_handlers:
+            h(msg, meta)
+
+    def handle_chat(self, msg, meta):
+        """
+        handle_chat(msg, meta) -> None
 
         Invoked for every "live" chat message received.
-        msg is the Message being dealt with; msgtype is a dict storing
-        certain properties of the message:
+        msg is the Message being dealt with; meta is a dict storing certain
+        properties of the message:
         own : Whether the message is an own message (either from a command
               reply, or (in case of get-message) from the same session ID
               as the current one).
@@ -1482,20 +1549,44 @@ class LoggingEndpoint(HeimEndpoint):
         long: Whether the message comes from a get-message-reply and has
               the entire (possibly long) content in it (check the truncated
               member of the message, just to be sure).
+        raw : The packet the message originated from.
         """
         pass
 
-    def handle_logs(self, msglist, type):
+    def handle_logs(self, msglist, meta):
         """
-        handle_logs(self, msglist, type) -> None
+        handle_logs(self, msglist, meta) -> None
 
         Invoked for every piece of past chat logs received.
-        msglist is a list of Message-s; msgtype is a dict containing
+        msglist is a list of Message-s; meta is a dict containing
         meta-information:
         snapshot: Whether the messages came from a snapshot-event (whichever
                   use one might have from that).
+        raw     : The packet the messages originated from.
         """
         pass
+
+    def add_chat_handler(self, handler):
+        """
+        add_chat_handler(handler) -> None
+
+        Add the given chat handler to self.
+        """
+        with self.lock:
+            if handler in self.chat_handlers: return
+            self.chat_handlers.append(handler)
+
+    def remove_chat_handler(self, handler):
+        """
+        remove_chat_handler(handler) -> None
+
+        Remove the given chat handler from self.
+        """
+        with self.lock:
+            try:
+                self.chat_handlers.remove(handler)
+            except KeyError:
+                pass
 
     def refresh_users(self):
         """
@@ -1521,3 +1612,38 @@ class LoggingEndpoint(HeimEndpoint):
         with self.lock:
             self.messages.clear()
             return self.send_packet('log', n=n)
+
+# ;)
+class BaseBot(LoggingEndpoint):
+    """
+    BaseBot(**config) -> new instance
+
+    Attributes (settable via config):
+    command_handlers: Mapping of command name strings to lists of handler
+                      callables for the command. Called in the same way
+                      as chat message handlers.
+
+    A LoggingEndpoint that implements commands.
+    """
+
+    def __init__(self, **config):
+        "Constructor. See class docstring for details."
+        LoggingEndpoint.__init__(self, **config)
+        self.command_handlers = config.get('command_handlers', {})
+
+    def _run_chat_handlers(self, msg, meta):
+        """
+        _run_chat_handlers(msg, meta) -> None
+
+        Invoke handle_chat() and all the handlers in chat_handlers with the
+        given arguments; also run command handlers.
+        (Overriding same-named method from LoggingEndpoint.)
+        """
+        LoggingEndpoint._run_chat_handlers(self, msg, meta)
+        if msg.text.startswith('!'):
+            parts = parse_command(msg.text)
+            cmd = parts[0][1:]
+            for h in self.command_handlers.get(cmd, ()):
+                h(msg, meta)
+
+    # TODO: add_message_handler, remove_message_handler
