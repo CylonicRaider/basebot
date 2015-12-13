@@ -1023,6 +1023,8 @@ class HeimEndpoint(object):
         After wrapping structures in the reply into the corresponding
         record classes, handle_early(), built-in handlers, generic type
         handlers, and call-backs are invoked (in that order).
+        The '_self' item of the packet is set to the HeimEndpoint instance
+        the packet is handled by, to aid external call-backs.
         """
         try:
             packet = self._postprocess_packet(packet)
@@ -1320,7 +1322,7 @@ class HeimEndpoint(object):
         """
         add_handler(pkttype, handler) -> None
 
-        Register handler for handling packets of type pkttype.
+        Register a handler for handling packets of type pkttype.
         """
         with self.lock:
             l = self.handlers.setdefault(pkttype, [])
@@ -1330,11 +1332,14 @@ class HeimEndpoint(object):
         """
         remove_handler(handler) -> None
 
-        Remove any bindings of handler.
+        Remove any bindings of the given handler.
         """
         with self.lock:
             for e in self.handlers.values():
-                e.remove(handler)
+                try:
+                    e.remove(handler)
+                except KeyError:
+                    pass
 
     def set_callback(self, id, cb):
         """
@@ -1349,9 +1354,9 @@ class HeimEndpoint(object):
             else:
                 self.callbacks[id] = cb
 
-    def send_packet_raw(self, type, callback=None, data=None):
+    def send_packet_raw(self, type, callback=None, data=Ellipsis):
         """
-        send_packet_raw(type, callback, data) -> str
+        send_packet_raw(type, callback=None, data=Ellipsis) -> str
 
         Send a packet to the server.
         Differently to send_packet(), keyword arguments are not used,
@@ -1364,7 +1369,7 @@ class HeimEndpoint(object):
             if callback is not None:
                 self.callbacks[cmdid] = callback
         pkt = {'type': type, 'id': cmdid}
-        if data is not None: pkt['data'] = data
+        if data is not Ellipsis: pkt['data'] = data
         self.send_raw(pkt)
         return cmdid
 
@@ -1510,18 +1515,19 @@ class LoggingEndpoint(HeimEndpoint):
                 'own': packet.type.endswith('-reply'),
                 'edit': packet.type.startswith('send-'),
                 'long': False,
-                'raw': packet})
+                'raw': packet,
+                'self': self})
         elif packet.type == 'get-message-reply':
             sid = packet.data.sender.session_id
             self._run_chat_handlers(packet.data, {
-                'own': (sid == self.session_id),
-                'edit': False, 'long': True, 'raw': packet})
+                'own': (sid == self.session_id), 'edit': False,
+                'long': True, 'raw': packet, 'self': self})
         elif packet.type == 'log-reply':
             self.handle_logs(packet.data['log'],
-                {'snapshot': False, 'raw': packet})
+                {'snapshot': False, 'raw': packet, 'self': self})
         elif packet.type == 'snapshot-event':
             self.handle_logs(packet.data['log'],
-                {'snapshot': True, 'raw': packet})
+                {'snapshot': True, 'raw': packet, 'self': self})
 
     def _run_chat_handlers(self, msg, meta):
         """
@@ -1550,6 +1556,7 @@ class LoggingEndpoint(HeimEndpoint):
               the entire (possibly long) content in it (check the truncated
               member of the message, just to be sure).
         raw : The packet the message originated from.
+        self: The LoggingEndpoint instance this command is invoked from.
         """
         pass
 
@@ -1563,8 +1570,24 @@ class LoggingEndpoint(HeimEndpoint):
         snapshot: Whether the messages came from a snapshot-event (whichever
                   use one might have from that).
         raw     : The packet the messages originated from.
+        self    : The LoggingEndpoint instance this command is invoked from.
         """
         pass
+
+    def send_chat(self, content, parent=None, **meta):
+        """
+        send_chat(content, parent=None, **meta) -> seqid
+
+        Send a chat message. content is the content of the message, parent
+        the message ID to reply to (or None for starting a new thread).
+        Items from meta are copied into the packet without further
+        examination.
+        The sequential ID of the packet sent is returned.
+        A call-back may be specified by using the _callback keyword
+        argument.
+        """
+        return self.send_packet('send', content=content, parent=parent,
+                                **meta)
 
     def add_chat_handler(self, handler):
         """
@@ -1616,19 +1639,23 @@ class LoggingEndpoint(HeimEndpoint):
 # ;)
 class BaseBot(LoggingEndpoint):
     """
-    BaseBot(**config) -> new instance
+    BaseBot(roomname=None, **config) -> new instance
+
+    A LoggingEndpoint that supports commands.
+    For symmetry with Bot (and because this is the only setting necessary to
+    start a bot), the roomname configuration value is provided as the only
+    positional argument (it may still be specified as a keyword argument).
 
     Attributes (settable via config):
     command_handlers: Mapping of command name strings to lists of handler
-                      callables for the command. Called in the same way
-                      as chat message handlers.
-
-    A LoggingEndpoint that implements commands.
+                      callables for the command. Called as handle_command(),
+                      see there. Handlers for the None command (similarly to
+                      packet handlers for None) are called for any command.
     """
 
-    def __init__(self, **config):
-        "Constructor. See class docstring for details."
-        LoggingEndpoint.__init__(self, **config)
+    def __init__(self, roomname=None, **config):
+        "Initializer. See class docstring for details."
+        LoggingEndpoint.__init__(self, roomname=roomname, **config)
         self.command_handlers = config.get('command_handlers', {})
 
     def _run_chat_handlers(self, msg, meta):
@@ -1642,8 +1669,170 @@ class BaseBot(LoggingEndpoint):
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
         if msg.text.startswith('!'):
             parts = parse_command(msg.text)
+            meta = {'line': msg.text, 'message': msg,
+                    'packet': meta['raw'], 'msgid': msg.id}
+            self.handle_command(parts, meta)
+            self._run_command_handlers(None, cmdline, meta)
             cmd = parts[0][1:]
-            for h in self.command_handlers.get(cmd, ()):
-                h(msg, meta)
+            if cmd: self._run_command_handlers(cmd, cmdline, meta)
 
-    # TODO: add_message_handler, remove_message_handler
+    def _run_command_handlers(self, cmd, cmdline, meta):
+        """
+        _run_command_handlers(cmd, cmdline, meta) -> None
+
+        Run the handlers for command cmd with the parameters cmdline and
+        meta.
+        cmd must not necessarily represent the command encoded in
+        cmdline.
+        """
+        for h in self.command_handlers.get(cmd, ()):
+            h(msg, meta)
+
+    def handle_command(self, cmdline, meta):
+        """
+        handle_command(cmdline, meta) -> None
+
+        Handle an arbitrary command. cmdline is a list of Tokens-s, as
+        returned by parse_command() (differently from the command names
+        handlers can be registered for, the very first token includes
+        the leading exclamation mark); meta is a dictionary holding
+        meta-data:
+        line   : The complete command line (the content of the Message the
+                 command it in).
+        message: The Message the command stems from.
+        packet : The Packet the message comes from.
+        msgid  : The ID of message.
+        """
+        pass
+
+    def add_command_handler(self, cmd, handler):
+        """
+        add_command_handler(cmd, handler) -> None
+
+        Register a handler for the given command (specified without the
+        leading exclamation mark).
+        """
+        with self.lock:
+            l = self.command_handlers.setdefault(cmd, [])
+            if handler not in l: l.append(handler)
+
+    def remove_command_handler(self, handler):
+        """
+        remove_handler(handler) -> None
+
+        Remove any bindings of the given handler.
+        """
+        with self.lock:
+            for e in self.command_handlers.values():
+                try:
+                    e.remove(handler)
+                except KeyError:
+                    pass
+
+class Bot(BaseBot):
+    """
+    Bot(roomname=None, **config) -> new instance
+
+    A BaseBot that implements the botrulez (github.com/jedevc/botrulez):
+    !ping[ @myname]  -> Reply with a "Pong!".
+    !help[ @myname]  -> Reply with a help message.
+    !uptime @myhname -> Reply with a message informing about this bot's
+                        current uptime, of the kind:
+                        /me is up since <datetime> (<timediff>)
+
+    Instance variables (settable via config):
+    do_stdcommands: Whether the standard commands should be respected at all.
+                    Defaults to True.
+    ping_text     : The text to reply with to a (general) !ping command. May
+                    be None to indicate that the command should be ignored.
+                    Defaults to "Pong!".
+    spec_ping_text: The text to reply with to a specific !ping command. May
+                    be None as well. Defaults to Ellipsis, which means the
+                    value of ping_text will be used.
+    short_help    : A short (preferably one-line) message to reply with to a
+                    !help command. May be None to ignore the command, as the
+                    default is.
+    long_help     : Message to reply with to a specific !help command. May be
+                    long and elaborate, of whichever style is appropriate, or
+                    None not to reply at all. Defaults to Ellipsis, so that
+                    short_help is used instead.
+    do_uptime     : Boolean indicating whether the !uptime command should be
+                    replied to. Defaults to True.
+    do_gen_uptime : Boolean indicating whether the generic !uptime command
+                    should be replied to. Defaults to False, as the botrulez
+                    discourage it, but still provided for symmetry to the
+                    other commands.
+    aliases       : List of alternate nick-names to accept in commands as
+                    oneself instead of the "current" one (useful for "gauge
+                    bots", which display information in their nick-name).
+                    Defaults to an empty list.
+    started       : UNIX timestamp of when the bot started. Defaults to the
+                    time when the constructor was called.
+    """
+
+    def __init__(self, roomname=None, **config):
+        "Initializer. See class docstring for invocation details."
+        BaseBot.__init__(self, roomname, **config)
+        self.do_stdcommands = config.get('do_stdcommands', True)
+        self.ping_text = config.get('ping_text', 'Pong!')
+        self.spec_ping_text = config.get('spec_ping_text', Ellipsis)
+        self.short_help = config.get('short_help', None)
+        self.long_help = config.get('long_help', Ellipsis)
+        self.do_uptime = config.get('do_uptime', True)
+        self.do_gen_uptime = config.get('do_gen_uptime', False)
+        self.aliases = config.get('aliases', [])
+        self.started = config.get('started', time.time())
+
+    def handle_command(self, cmdline, meta):
+        """
+        handle_command(cmdline, meta) -> None
+
+        Handle an arbitrary command.
+        See BaseBot.handle_command() for details.
+        Overridden to implement the botrulez commands.
+        """
+        # Convenience function for choosing a reply and sending it.
+        def reply(text, alttext=None):
+            if text is Ellipsis:
+                text = alttext
+            if text is not None:
+                self.send_chat(text, meta['msgid'])
+        # Convenience function for checking if the command is specific and
+        # matches myself.
+        def nick_matches():
+            if len(cmdline) != 2:
+                return False
+            nn = normalize_nick(cmdline[1])
+            if nn == normnick:
+                return True
+            for i in self.aliases:
+                if nn == normalize_nick(i):
+                    return True
+            return False
+        # Call parent class method.
+        BaseBot.handle_command(self, cmdline, meta)
+        # Don't continue if no command or explicitly forbidden.
+        if not cmdline or not self.do_stdcommands:
+            return
+        # Used in nick_matches().
+        normnick = normalize_nick(self.eff_nickname or self.nickname or '')
+        # Actual commands.
+        if cmdline[0] == '!ping':
+            if len(cmdline) == 1:
+                reply(self.ping_text)
+            elif nick_matches():
+                reply(self.spec_ping_text, self.ping_text)
+        elif cmdline[0] == '!help':
+            if len(cmdline) == 1:
+                reply(self.short_help)
+            elif nick_matches():
+                reply(self.long_help, self.short_help)
+        elif cmdline[0] == '!uptime':
+            if (self.do_uptime and len(cmdline) == 1 or
+                    self.do_gen_uptime and nick_matches()):
+                if self.started is None:
+                    reply("/me Uptime information is N/A")
+                else:
+                    reply('/me is up since %s (%s)' % (
+                        format_datetime(self.started),
+                        format_timedelta(time.time() - self.started)))
