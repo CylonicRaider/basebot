@@ -19,6 +19,10 @@ HeimEndpoint     : A bare-bones implementation of the API; useful for
 LoggingEndpoint  : HeimEndpoint maintaining a user list and chat logs on
                    demand.
 BaseBot          : LoggingEndpoint supporting in-chat commands.
+Bot              : BaseBot conforming to the botrulez
+                   (github.com/jedevc/botrulez).
+BotManager       : Class coordinating multiple Bot (or, more exactly,
+                   HeimEndpoint) instances.
 """
 
 # ---------------------------------------------------------------------------
@@ -753,6 +757,7 @@ class HeimEndpoint(object):
                   While account-related event handlers are present, actual
                   support for accounts is lacking, and has to be implemented
                   manually.
+    manager     : BotManager instance responsible for this HeimEndpoint.
 
     Access to the attributes should be serialized using the instance lock
     (available in the lock attribute). The __enter__ and __exit__ methods
@@ -788,6 +793,7 @@ class HeimEndpoint(object):
         self.retry_count = config.get('retry_count', 4)
         self.retry_delay = config.get('retry_delay', 10)
         self.handlers = config.get('handlers', {})
+        self.manager = config.get('manager', None)
         self.cmdid = 0
         self.callbacks = {}
         self.eff_nickname = None
@@ -867,11 +873,12 @@ class HeimEndpoint(object):
                     self.handle_connect()
                 self._conncond.notifyAll()
 
-    def _disconnect(self):
+    def _disconnect(self, ok):
         """
-        _disconnect() -> None
+        _disconnect(ok) -> None
 
         Internal back-end for close(). Takes care of synchronization.
+        ok can be used to specify whether this was a "clean" close.
         """
         with self._conncond:
             while self._connecting:
@@ -879,9 +886,9 @@ class HeimEndpoint(object):
             conn = self._connection
             self._connection = None
             if self._logged_in:
-                self.handle_logout(True)
+                self.handle_logout(ok)
                 self._logged_in = False
-            self.handle_close(True)
+            self.handle_close(ok)
             self._conncond.notifyAll()
         if conn is not None:
             conn.close()
@@ -936,7 +943,7 @@ class HeimEndpoint(object):
         Close the current connection (if any).
         Raises a websocket.WebSocketError is something unexpected happens.
         """
-        self._disconnect()
+        self._disconnect(True)
 
     def reconnect(self):
         """
@@ -980,6 +987,7 @@ class HeimEndpoint(object):
         """
         self.eff_nickname = None
         self.session_id = None
+        if self.manager: self.manager.handle_close(self, ok)
 
     def recv_raw(self, retry=True):
         """
@@ -1338,7 +1346,7 @@ class HeimEndpoint(object):
             for e in self.handlers.values():
                 try:
                     e.remove(handler)
-                except KeyError:
+                except ValueError:
                     pass
 
     def set_callback(self, id, cb):
@@ -1434,6 +1442,22 @@ class HeimEndpoint(object):
                     self.passcode is not None):
                 return self.send_packet('auth', type='passcode',
                                         passcode=self.passcode)
+
+    def main(self):
+        """
+        main() -> None
+
+        "Main" method. Connects to the configured room, runs an event loop,
+        and closes whenever that aborts (normally or due to an exception).
+        """
+        self.connect()
+        ok = True
+        try:
+            self.handle_loop()
+        except Exception:
+            ok = False
+        finally:
+            self._disconnect(ok)
 
 class LoggingEndpoint(HeimEndpoint):
     """
@@ -1608,7 +1632,7 @@ class LoggingEndpoint(HeimEndpoint):
         with self.lock:
             try:
                 self.chat_handlers.remove(handler)
-            except KeyError:
+            except ValueError:
                 pass
 
     def refresh_users(self):
@@ -1726,7 +1750,7 @@ class BaseBot(LoggingEndpoint):
             for e in self.command_handlers.values():
                 try:
                     e.remove(handler)
-                except KeyError:
+                except ValueError:
                     pass
 
 class Bot(BaseBot):
@@ -1836,3 +1860,98 @@ class Bot(BaseBot):
                     reply('/me is up since %s (%s)' % (
                         format_datetime(self.started),
                         format_timedelta(time.time() - self.started)))
+
+class BotManager(object):
+    """
+    BotManager(**config) -> new instance
+
+    Class coordinating multiple Bot (or, equally, HeimEndpoint) instances;
+    providing simple spawning and re-starting.
+
+    config specifies configuration values:
+    botcls: Bot class for creating new bots. It is assumed that instances can
+            be constructed as with the HeimEndpoint class. Defaults to None,
+            meaning no new bots can be created (from the BotManager instance).
+    botcfg: Dictionary of configuration values to pass to newly-created bots.
+            Defaults to an empty dictionary.
+    bots  : A list of bots to be used. The manager attribute of all entries
+            will be re-assigned to self.
+
+    Additional instance variables:
+    lock: A threading.RLock instance used for serializing attribute access.
+          The __enter__ and __exit__ methods of the lock are exposed under
+          the same name.
+    """
+
+    def __init__(self, **config):
+        "Initializer. See class docstring for invocation details."
+        self.botcls = config.get('botcls', None)
+        self.botcfg = config.get('botcfg', {})
+        self.bots = config.get('bots', [])
+        self.lock = threading.RLock()
+        for b in self.bots:
+            with b.lock:
+                b.manager = self
+
+    def __enter__(self):
+        return self.lock.__enter__()
+    def __exit__(self, *args):
+        return self.lock.__exit__(*args)
+
+    def make_bot(self, roomname=None, **config):
+        """
+        make_bot(roomname=None, **config) -> botcls instance
+
+        Create a new Bot (or, HeimEndpoint) instance according to the
+        internal configuration.
+        For configuration, self.botcfg is taken as a default, and config
+        (and roomname) is merged with that, overriding the former in case
+        of conflicts.
+        May raise a TypeError if self.botcls is None.
+        """
+        with self.lock:
+            if self.botcls is None:
+                raise TypeError('Default bot class not specified')
+            cls = self.botcls
+            cfg = dict(self.botcfg)
+            cfg.update(config)
+            if roomname is not None:
+                cfg['roomname'] = roomname
+        return cls(**cfg)
+
+    def add_bot(self, bot):
+        """
+        add_bot(bot) -> None
+
+        Add a bot to self; if already there, do nothing.
+        Sets the bot's manager attribute to self (in any case).
+        """
+        with self.lock:
+            if not bot in self.bots:
+                self.bots.append(bot)
+        with bot.lock:
+            bot.manager = self
+
+    def remove_bot(self, bot):
+        """
+        remove_bot(bot) -> None
+
+        Remove a bot from self (if present).
+        Sets the bot's manager attribute to None (in any case).
+        """
+        with bot.lock:
+            bot.manager = None
+        with self.lock:
+            try:
+                self.bots.remove(bot)
+            except ValueError:
+                pass
+
+    def handle_close(self, bot, ok):
+        """
+        handle_close(bot, ok) -> None
+
+        Invoked by bot when it closes; ok tells whether the close was
+        "clean".
+        """
+        self.remove_bot(bot)
