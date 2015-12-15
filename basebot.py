@@ -1869,13 +1869,17 @@ class BotManager(object):
     providing simple spawning and re-starting.
 
     config specifies configuration values:
-    botcls: Bot class for creating new bots. It is assumed that instances can
-            be constructed as with the HeimEndpoint class. Defaults to None,
-            meaning no new bots can be created (from the BotManager instance).
-    botcfg: Dictionary of configuration values to pass to newly-created bots.
-            Defaults to an empty dictionary.
-    bots  : A list of bots to be used. The manager attribute of all entries
-            will be re-assigned to self.
+    botcls         : Bot class for creating new bots. It is assumed that
+                     instances can be constructed as with the HeimEndpoint
+                     class. Defaults to None, meaning no new bots can be
+                     created (from the BotManager instance).
+    botcfg         : Dictionary of configuration values to pass to
+                     newly-created bots. Defaults to an empty dictionary.
+    bots           : A list of bots to be used. The manager attribute of all
+                     entries will be re-assigned to self.
+    respawn_crashed: Re-spawn bots that crashed. Defaults to False.
+    respawn_delay  : Wait for this amount of seconds before re-spawning a
+                     bot. Defaults to 60.
 
     Additional instance variables:
     lock: A threading.RLock instance used for serializing attribute access.
@@ -1888,7 +1892,11 @@ class BotManager(object):
         self.botcls = config.get('botcls', None)
         self.botcfg = config.get('botcfg', {})
         self.bots = config.get('bots', [])
+        self.respawn_crashed = config.get('respawn_crashed', False)
+        self.respawn_delay = config.get('respawn_delay', 60.0)
         self.lock = threading.RLock()
+        self._shutting_down = False
+        self._joincond = threading.Condition(self.lock)
         for b in self.bots:
             with b.lock:
                 b.manager = self
@@ -1898,15 +1906,54 @@ class BotManager(object):
     def __exit__(self, *args):
         return self.lock.__exit__(*args)
 
-    def make_bot(self, roomname=None, **config):
+    def start(self):
         """
-        make_bot(roomname=None, **config) -> botcls instance
+        start() -> None
+
+        Spawn all the bots managed by this instance. May spawn "ghost" copies
+        of bots already running. Does not wait for bots to finish.
+        """
+        with self.lock:
+            for b in self.bots:
+                spawn_thread(b.main)
+
+    def shutdown(self):
+        """
+        shutdown() -> None
+
+        Stop all the bots current running.
+        """
+        with self.lock:
+            self._shutting_down = True
+            l = list(self.bots)
+        for b in l:
+            b.close()
+        with self._joincond:
+            self._joincond.notifyAll()
+
+    def join(self):
+        """
+        join() -> None
+
+        Wait until all bots are removed from self (like, by being
+        stopped).
+        """
+        with self.lock:
+            while self.bots:
+                self._joincond.wait()
+
+    def make_bot(self, roomname=Ellipsis, passcode=Ellipsis,
+                 nickname=Ellipsis):
+        """
+        make_bot(roomname=Ellipss, passcode=Ellipsis, nickname=Ellipsis)
+            -> botcls instance
 
         Create a new Bot (or, HeimEndpoint) instance according to the
         internal configuration.
-        For configuration, self.botcfg is taken as a default, and config
-        (and roomname) is merged with that, overriding the former in case
-        of conflicts.
+        For configuration, self.botcfg is taken as a default, and a
+        dictionary made out of the non-Ellipsis is merged with that,
+        overriding any values from botcfg; that is used as the configuration
+        for the new bot.
         May raise a TypeError if self.botcls is None.
         """
         with self.lock:
@@ -1914,9 +1961,9 @@ class BotManager(object):
                 raise TypeError('Default bot class not specified')
             cls = self.botcls
             cfg = dict(self.botcfg)
-            cfg.update(config)
-            if roomname is not None:
-                cfg['roomname'] = roomname
+            if roomname is not Ellipsis: cfg['roomname'] = roomname
+            if passcode is not Ellipsis: cfg['passcode'] = passcode
+            if nickname is not Ellipsis: cfg['nickname'] = nickname
         return cls(**cfg)
 
     def add_bot(self, bot):
@@ -1952,6 +1999,28 @@ class BotManager(object):
         handle_close(bot, ok) -> None
 
         Invoked by bot when it closes; ok tells whether the close was
-        "clean".
+        "clean". May respawn the bot if self is configured accordingly.
         """
+        def respawner():
+            with self.lock:
+                if not self.respawn_crashed:
+                    return
+                timeout = self.respawn_delay
+            time.sleep(timeout)
+            try:
+                b = self.make_bot(r, p, n)
+            except TypeError:
+                return
+            self.add_bot(b)
+            b.main()
         self.remove_bot(bot)
+        with self.lock:
+            if self._shutting_down:
+                self._joincond.notifyAll()
+                return
+        with bot.lock:
+            r = bot.roomname
+            p = bot.passcode
+            n = bot.nickname
+        if r is None: return
+        spawn_thread(respawner)
