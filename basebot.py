@@ -34,7 +34,7 @@ __version__ = "2.0"
 
 # Modules - Standard library
 import sys, os, re, time
-import json
+import collections, json
 import logging
 import threading
 
@@ -1571,16 +1571,16 @@ class LoggingEndpoint(HeimEndpoint):
         Invoked for every "live" chat message received.
         msg is the Message being dealt with; meta is a dict storing certain
         properties of the message:
-        own : Whether the message is an own message (either from a command
-              reply, or (in case of get-message) from the same session ID
-              as the current one).
-        edit: Whether the message comes from an edit-event or -reply (i.e.,
-              whether the messages was edited post factum).
-        long: Whether the message comes from a get-message-reply and has
-              the entire (possibly long) content in it (check the truncated
-              member of the message, just to be sure).
-        raw : The packet the message originated from.
-        self: The LoggingEndpoint instance this command is invoked from.
+        own  :  Whether the message is an own message (either from a command
+                reply, or (in case of get-message) from the same session ID
+                as the current one).
+        edit :  Whether the message comes from an edit-event or -reply (i.e.,
+                whether the messages was edited post factum).
+        long  : Whether the message comes from a get-message-reply and has
+                the entire (possibly long) content in it (check the truncated
+                member of the message, just to be sure).
+        packet: The packet the message originated from.
+        self  : The LoggingEndpoint instance this command is invoked from.
         """
         pass
 
@@ -1593,7 +1593,7 @@ class LoggingEndpoint(HeimEndpoint):
         meta-information:
         snapshot: Whether the messages came from a snapshot-event (whichever
                   use one might have from that).
-        raw     : The packet the messages originated from.
+        packet  : The packet the messages originated from.
         self    : The LoggingEndpoint instance this command is invoked from.
         """
         pass
@@ -1693,8 +1693,8 @@ class BaseBot(LoggingEndpoint):
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
         if msg.text.startswith('!'):
             parts = parse_command(msg.text)
-            meta = {'line': msg.text, 'message': msg,
-                    'packet': meta['raw'], 'msgid': msg.id}
+            meta = {'line': msg.text, 'msg': msg, 'msg_meta': meta,
+                    'packet': meta['packet'], 'msgid': msg.id}
             self.handle_command(parts, meta)
             self._run_command_handlers(None, cmdline, meta)
             cmd = parts[0][1:]
@@ -1721,11 +1721,13 @@ class BaseBot(LoggingEndpoint):
         handlers can be registered for, the very first token includes
         the leading exclamation mark); meta is a dictionary holding
         meta-data:
-        line   : The complete command line (the content of the Message the
-                 command it in).
-        message: The Message the command stems from.
-        packet : The Packet the message comes from.
-        msgid  : The ID of message.
+        line    : The complete command line (the content of the Message the
+                  command it in).
+        msg     : The Message the command stems from.
+        msg_meta: Meta-data about msg, as described in handle_chat() in
+                  LoggingEndpoint.
+        packet  : The Packet the message comes from.
+        msgid   : The ID of message.
         """
         pass
 
@@ -1861,6 +1863,92 @@ class Bot(BaseBot):
                         format_datetime(self.started),
                         format_timedelta(time.time() - self.started)))
 
+class MiniBot(Bot):
+    """
+    MiniBot(roomname=None, **config) -> new instance
+
+    A Bot that provides convenience features for quick development.
+
+    Configuration values (mirrored in attributes):
+    regexes   : A regex-object mapping for message handling, or a sequence of
+                regex-object pairs, which will be converted to an ordered
+                mapping implicitly. Each incoming message is checked against
+                the keys of it (in the order the mapping's iterator returns
+                them) by re.match(), and, if the regex matches, the
+                corresponding value will be processed as described below.
+    match_self: Whether messages from oneself should be replied to. Defaults
+                to False, meaning no.
+    match_all : Whether every regex should be checked against every message
+                (True), or whether matching should stop after the first regex
+                found (False; the default).
+
+    Call-back handling:
+    1. If the object is callable, step 4 will consider the result of the
+       object's call on the match object as the first argument, and a
+       dictionary with additional meta-data as a second argument:
+       self    : The MiniBot instance that started the call.
+       msg     : The Message the text matched came from.
+       msg_meta: Meta-data about msg, as described in handle_chat() in
+                 LoggingEndpoint.
+       packet  : The packet the message was from.
+       (Steps 2 and 3 are skipped in this case.)
+    2. If the object is not callable, but a tuple or list of strings, step 3
+       is performed on each element of it (in order), otherwise, on the
+       object itself.
+    3. The object is applied the match's expand method, allowing to re-use
+       matched groups in the reply.
+    4. One (or possibly more) replies to the "original" message are
+       constructed from the object:
+       If the object is None, nothing is replied;
+       if it is a single string, it is replied with;
+       if it is a sequence of strings, each element is replied with.
+    """
+
+    def __init__(self, roomname=None, **config):
+        "Initializer. See class docstring for details."
+        Bot.__init__(self, roomname, **config)
+        self.regexes = config.get('regexes', {})
+        self.match_self = config.get('match_self', False)
+        self.match_all = config.get('match_all', False)
+        self._orig_regexes = self.regexes
+        if not hasattr(self.regexes, 'keys'):
+            self.regexes = collections.OrderedDict(self.regexes)
+
+    def handle_chat(self, msg, meta):
+        "See Bot.handle_chat() for details."
+        if not self.match_self and meta['own']:
+            return
+        text = msg.content
+        for k, v in self.regexes.items():
+            m = re.match(k, text)
+            if not m: continue
+            self._process_callbacks(msg, meta, m, v)
+            if not self.match_all:
+                return
+
+    def _process_callbacks(self, msg, meta, match, value):
+        """
+        _process_callbacks(msg, meta, match, value) -> None
+
+        Handle a chat message call-back.
+        Used internally.
+        """
+        if callable(value):
+            value = value(match, {'self': self, 'msg': msg,
+                'msg_meta': meta, 'packet': meta['packet']})
+            expand = False
+        else:
+            expand = True
+        if value is None:
+            rlist = ()
+        elif isinstance(value, (list, tuple)):
+            rlist = value
+        else:
+            rlist = (value,)
+        for v in rlist:
+            if expand: v = match.expand(v)
+            self.send_chat(v, meta['packet'].id)
+
 class BotManager(object):
     """
     BotManager(**config) -> new instance
@@ -1935,8 +2023,7 @@ class BotManager(object):
         """
         join() -> None
 
-        Wait until all bots are removed from self (like, by being
-        stopped).
+        Wait until all bots are removed from self (like, by being stopped).
         """
         with self.lock:
             while self.bots:
