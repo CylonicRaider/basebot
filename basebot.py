@@ -154,6 +154,19 @@ def format_delta(delta, fractions=True):
             ret.append('%ds' % delta)
     return ' '.join(ret)
 
+def spawn_thread(_target, *_args, **_kwds):
+    """
+    spawn_thread(_target, *args, **_kwds) -> threading.Thread
+
+    Utility function for spawning background threads.
+    Create a threading.Thread instance configured with the given parameters,
+    make it daemonic, start it, and return.
+    """
+    thr = threading.Thread(target=_target, args=_args, kwargs=_kwds)
+    thr.setDaemon(True)
+    thr.start()
+    return thr
+
 class Token(str):
     """
     Token(obj, offset) -> new instance
