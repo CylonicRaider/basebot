@@ -35,6 +35,7 @@ __version__ = "2.0"
 # Modules - Standard library
 import sys, os, re, time
 import collections, json
+import optparse
 import logging
 import threading
 
@@ -724,6 +725,10 @@ class MessageTree(object):
             l = list(self._messages.values())
             l.sort(key=lambda m: m.id)
             return l
+
+# ---------------------------------------------------------------------------
+# "Main" classes
+# ---------------------------------------------------------------------------
 
 class HeimEndpoint(object):
     """
@@ -1975,10 +1980,13 @@ class BotManager(object):
                      class. Defaults to None, meaning no new bots can be
                      created (from the BotManager instance).
     botcfg         : Dictionary of configuration values to pass to
-                     newly-created bots. Defaults to an empty dictionary.
+                     newly-created bots. Defaults to the keyword argument
+                     dictionary itself, simplifying combined configuration.
     bots           : A list of bots to be used. The manager attribute of all
-                     entries will be re-assigned to self.
-    respawn_crashed: Re-spawn bots that crashed. Defaults to False.
+                     entries will be re-assigned to self. Defaults to an
+                     empty list.
+    respawn_crashed: Re-spawn bots that crashed, if they were of the same
+                     class that botcls is. Defaults to False.
     respawn_delay  : Wait for this amount of seconds before re-spawning a
                      bot. Defaults to 60.
 
@@ -1988,10 +1996,102 @@ class BotManager(object):
           the same name.
     """
 
+    @classmethod
+    def early_init(cls, config):
+        """
+        early_init(config) -> None
+
+        Perform early initialization when run_main() is run.
+        config is the dictionary of the arguments specified to run_main();
+        it can be modified.
+        The default implementation does nothing.
+        """
+        pass
+
+    @classmethod
+    def prepare_parser(cls, parser, config):
+        """
+        prepare_parser(parser, config) -> None
+
+        Add custom options to parser (an optparse.OptionParser) instance.
+        config is the dictionary of the arguments specified to run_main().
+        The default implementation adds the --url-template, --nickname,
+        --retry-count, --retry-delay, --loglevel, and --logfile options,
+        whereof the first four map to corresponding HeimEndpoint keyword
+        arguments, and the last two are used be BotManager.prepare_main().
+        """
+        parser.add_option('--url-template', dest='url_template')
+        parser.add_option('--nickname', dest='nickname')
+        parser.add_option('--retry-count', type=int, dest='retry_count')
+        parser.add_option('--retry-delay', type=float, dest='retry_delay')
+        parser.add_option('--loglevel', dest='loglevel',
+                          default=config.get('loglevel', logging.INFO))
+        parser.add_option('--logfile', dest='logfile',
+                          default=config.get('logfile'))
+
+    @classmethod
+    def prepare_main(cls, options, arguments, config):
+        """
+        prepare_main(options, arguments, config) -> (bots, config)
+
+        Perform final preparations for running; return parameters suitable
+        for from_config().
+        options and arguments are a optparse.Values object and a list of
+        remaining positional arguments, respectively; config is the
+        dictionary of arguments specified to run_main().
+        The default implementation initializes the logging module according
+        to the given options in addition to preparing the return value,
+        arguments and config are passed through as it, after the options
+        noted in prepare_parser() as "mapped to corresponding HeimEndpoint
+        keyword arguments" that are not None are copied into config.
+        """
+        kwds = {'stream': sys.stderr}
+        if options.logfile is not None:
+            if isinstance(options.logfile, str):
+                kwds['filename'] = options.logfile
+            else:
+                kwds['stream'] = options.logfile
+        loglevel = options.loglevel
+        logging.basicConfig(format='[%(asctime)s %(name)s %(levelname)s] '
+            '%(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=loglevel,
+            **kwds)
+        for name in ('url_template', 'nickname', 'retry_count',
+                     'retry_delay'):
+            value = getattr(options, name)
+            if value is not None:
+                config[name] = value
+        return (arguments, config)
+
+    @classmethod
+    def from_config(cls, bots, config):
+        """
+        from_config(cls, bots, config) -> new instance
+
+        Create a BotManager from configuration pairs (in config) and bot
+        definitions (in bots). config should contain a botcls entry, or
+        the call will fail (unless no bots are specified at all).
+        bots is a list of tuples, which will be passed to the make_bot()
+        method "unpackedly" (i.e., not as a single argument, but as as many
+        as there are entries). If an entry of bots is a single string, it is
+        regarded as either a "bare" room name, or a room name followed
+        -- after a colon -- by a passcode, e.g., 'test' parses to ('test',),
+        and 'top:secret' parses to ('top', 'secret').
+        """
+        mgr = cls(**config)
+        for d in bots:
+            if isinstance(d, str):
+                room, sep, passcode = d.partition(':')
+                if sep:
+                    d = (room, passcode)
+                else:
+                    d = (room,)
+            mgr.add_bot(mgr.make_bot(*d))
+        return mgr
+
     def __init__(self, **config):
         "Initializer. See class docstring for invocation details."
         self.botcls = config.get('botcls', None)
-        self.botcfg = config.get('botcfg', {})
+        self.botcfg = config.get('botcfg', config)
         self.bots = config.get('bots', [])
         self.respawn_crashed = config.get('respawn_crashed', False)
         self.respawn_delay = config.get('respawn_delay', 60.0)
@@ -2058,7 +2158,7 @@ class BotManager(object):
         """
         with self.lock:
             if self.botcls is None:
-                raise TypeError('Default bot class not specified')
+                raise TypeError('Bot class not specified')
             cls = self.botcls
             cfg = dict(self.botcfg)
             if roomname is not Ellipsis: cfg['roomname'] = roomname
@@ -2093,34 +2193,92 @@ class BotManager(object):
                 self.bots.remove(bot)
             except ValueError:
                 pass
+            if self._shutting_down:
+                self._joincond.notifyAll()
+                return
+
+    def swap_bots(self, old, new):
+        """
+        swap_bots(old, new) -> None
+
+        Remove a bot and add a new bot atomically.
+        See add_bot() and remove_bot() for semantics.
+        Used to prevent shutdowns due to all bots being respawned at the
+        same time.
+        """
+        with old.lock:
+            old.manager = None
+        with self.lock:
+            try:
+                self.bots.remove(old)
+            except ValueError:
+                pass
+            if not new in self.bots:
+                self.bots.append(new)
+        with new.lock:
+            new.manager = self
 
     def handle_close(self, bot, ok):
         """
         handle_close(bot, ok) -> None
 
         Invoked by bot when it closes; ok tells whether the close was
-        "clean". May respawn the bot if self is configured accordingly.
+        "clean". May respawn the bot if self is configured accordingly,
+        and (in particular) bot is an instance of self.botcls.
         """
         def respawner():
+            time.sleep(timeout)
+            b.main()
+        try:
             with self.lock:
-                if not self.respawn_crashed:
+                if not isinstance(bot, self.botcls):
+                    return
+                elif not self.respawn_crashed:
                     return
                 timeout = self.respawn_delay
-            time.sleep(timeout)
+            with bot.lock:
+                r = bot.roomname
+                p = bot.passcode
+                n = bot.nickname
+            if r is None:
+                return
             try:
                 b = self.make_bot(r, p, n)
             except TypeError:
                 return
-            self.add_bot(b)
-            b.main()
-        self.remove_bot(bot)
-        with self.lock:
-            if self._shutting_down:
-                self._joincond.notifyAll()
-                return
-        with bot.lock:
-            r = bot.roomname
-            p = bot.passcode
-            n = bot.nickname
-        if r is None: return
-        spawn_thread(respawner)
+            self.swap_bots(bot, b)
+            bot = None
+            spawn_thread(respawner)
+        finally:
+            if bot:
+                self.remove_bot(bot)
+
+    def main():
+        """
+        main() -> None
+
+        Spawn the pre-configured bots, and wait for all of them to finish.
+        Equivalent to calling first start(), then join().
+        """
+        self.start()
+        self.join()
+
+def run_main(**config):
+    """
+    run_main(**config) -> None
+
+    Initialize a BotManager, seed it with configuration from command-line
+    arguments, and call its main() method.
+    """
+    mgrcls = config.get('mgrcls', BotManager)
+    mgrcls.early_init(config)
+    parser = optparse.OptionParser()
+    mgrcls.prepare_parser(parser, config)
+    options, arguments = parser.parse_args(config.get('argv', sys.argv[1:]))
+    bots, cfg = mgrcls.prepare_main(options, arguments, config)
+    inst = mgrcls.from_config(bots, cfg)
+    try:
+        inst.main()
+    except KeyboardInterrupt:
+        inst.shutdown()
+        inst.join()
