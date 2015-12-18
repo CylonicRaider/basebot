@@ -749,8 +749,9 @@ class HeimEndpoint(object):
     roomname    : Name of room to connect to. Defaults to None. Must be
                   explicitly set for the connection to succeed.
     nickname    : Nick-name to set on connection. Updated when a nick-reply
-                  is received. Defaults to None; in that case, no nick-name
-                  is set.
+                  is received. If None, no nick-name is set. Defaults to
+                  the value of the NICKNAME class attribute (which, in turn,
+                  defaults to None).
     passcode    : Passcode for private rooms. Sent during (re-)connection.
                   Defaults to None; no passcode is sent in that case.
     retry_count : Amount of re-connection attempts until an operation (a
@@ -775,6 +776,8 @@ class HeimEndpoint(object):
                   While account-related event handlers are present, actual
                   support for accounts is lacking, and has to be implemented
                   manually.
+    logger      : logging.Logger instance to log to. Defaults to the root
+                  logger (at time of creation).
     manager     : BotManager instance responsible for this HeimEndpoint.
 
     Access to the attributes should be serialized using the instance lock
@@ -802,15 +805,19 @@ class HeimEndpoint(object):
                   attribute should be atomic.
     """
 
+    # Default nick-name. Can be overridden by subclasses.
+    NICKNAME = None
+
     def __init__(self, **config):
         "Initializer. See class docstring for invocation details."
         self.url_template = config.get('url_template', URL_TEMPLATE)
         self.roomname = config.get('roomname', None)
-        self.nickname = config.get('nickname', None)
+        self.nickname = config.get('nickname', self.NICKNAME)
         self.passcode = config.get('passcode', None)
         self.retry_count = config.get('retry_count', 4)
         self.retry_delay = config.get('retry_delay', 10)
         self.handlers = config.get('handlers', {})
+        self.logger = config.get('logger', logging.getLogger())
         self.manager = config.get('manager', None)
         self.cmdid = 0
         self.callbacks = {}
@@ -839,6 +846,7 @@ class HeimEndpoint(object):
         Returns the object produced, or raises an exception.
         Can be hooked by subclasses.
         """
+        self.logger.info('Connecting to %s...' % url)
         return JSONWebSocket(websocket.create_connection(url))
 
     def _attempt(self, func):
@@ -898,6 +906,7 @@ class HeimEndpoint(object):
         Internal back-end for close(). Takes care of synchronization.
         ok can be used to specify whether this was a "clean" close.
         """
+        self.logger.info('Closing...')
         with self._conncond:
             while self._connecting:
                 self._conncond.wait()
@@ -1285,6 +1294,7 @@ class HeimEndpoint(object):
 
         Built-in event packet handler.
         """
+        self.logger.info('Logged in.')
         self.handle_login()
         self._logged_in = True
         self.set_nickname()
@@ -1443,6 +1453,7 @@ class HeimEndpoint(object):
             if nick is not Ellipsis: self.nickname = nick
             if (self.get_connection() is not None and
                     self.nickname is not None):
+                self.logger.info('Setting nickname: %r' % self.nickname)
                 return self.send_packet('nick', name=self.nickname)
 
     def set_passcode(self, code=Ellipsis):
@@ -1458,6 +1469,7 @@ class HeimEndpoint(object):
             if code is not Ellipsis: self.passcode = code
             if (self.get_connectin() is not None and
                     self.passcode is not None):
+                self.logger.info('Authenticating with passcode...')
                 return self.send_packet('auth', type='passcode',
                                         passcode=self.passcode)
 
@@ -1628,6 +1640,7 @@ class LoggingEndpoint(HeimEndpoint):
         A call-back may be specified by using the _callback keyword
         argument.
         """
+        self.logger.info('Sending message: %r' % (content,))
         return self.send_packet('send', content=content, parent=parent,
                                 **meta)
 
@@ -1711,6 +1724,7 @@ class BaseBot(LoggingEndpoint):
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
         if msg.text.startswith('!'):
             parts = parse_command(msg.text)
+            self.logger.info('Got command: ' + ' '.join(map(repr, parts)))
             meta = {'line': msg.text, 'msg': msg, 'msg_meta': meta,
                     'packet': meta['packet'], 'msgid': msg.id}
             self.handle_command(parts, meta)
@@ -1936,10 +1950,13 @@ class MiniBot(Bot):
         "See Bot.handle_chat() for details."
         if not self.match_self and meta['own']:
             return
-        text = msg.content
+        text, logged = msg.content, False
         for k, v in self.regexes.items():
             m = re.match(k, text)
             if not m: continue
+            if not logged:
+                self.logger.info('Trigger message: %r' % text)
+                logged = Tue
             self._process_callbacks(msg, meta, m, v)
             if not self.match_all:
                 return
@@ -1982,6 +1999,7 @@ class BotManager(object):
     botcfg         : Dictionary of configuration values to pass to
                      newly-created bots. Defaults to the keyword argument
                      dictionary itself, simplifying combined configuration.
+    botname        : A symbolic name of the bot. Defaults to '<Bot>'.
     bots           : A list of bots to be used. The manager attribute of all
                      entries will be re-assigned to self. Defaults to an
                      empty list.
@@ -1989,6 +2007,7 @@ class BotManager(object):
                      class that botcls is. Defaults to False.
     respawn_delay  : Wait for this amount of seconds before re-spawning a
                      bot. Defaults to 60.
+    logger         : Logger to use. Defaults to the root logger.
 
     Additional instance variables:
     lock: A threading.RLock instance used for serializing attribute access.
@@ -2092,9 +2111,11 @@ class BotManager(object):
         "Initializer. See class docstring for invocation details."
         self.botcls = config.get('botcls', None)
         self.botcfg = config.get('botcfg', config)
+        self.botname = config.get('botname', '<Bot>')
         self.bots = config.get('bots', [])
         self.respawn_crashed = config.get('respawn_crashed', False)
         self.respawn_delay = config.get('respawn_delay', 60.0)
+        self.logger = config.get('logger', logging.getLogger())
         self.lock = threading.RLock()
         self._shutting_down = False
         self._joincond = threading.Condition(self.lock)
@@ -2114,6 +2135,7 @@ class BotManager(object):
         Spawn all the bots managed by this instance. May spawn "ghost" copies
         of bots already running. Does not wait for bots to finish.
         """
+        self.logger.info('Starting %s...' % self.botname)
         with self.lock:
             for b in self.bots:
                 spawn_thread(b.main)
@@ -2143,17 +2165,21 @@ class BotManager(object):
                 self._joincond.wait()
 
     def make_bot(self, roomname=Ellipsis, passcode=Ellipsis,
-                 nickname=Ellipsis):
+                 nickname=Ellipsis, _logger=Ellipsis):
         """
-        make_bot(roomname=Ellipss, passcode=Ellipsis, nickname=Ellipsis)
-            -> botcls instance
+        make_bot(roomname=Ellipss, passcode=Ellipsis, nickname=Ellipsis,
+                 logger=Ellipsis) -> botcls instance
 
         Create a new Bot (or, HeimEndpoint) instance according to the
         internal configuration.
+        If logger is Ellipsis, a new logger with the name informing about
+        the room name and the nick-name of the bot is created; if it is
+        None, the logger of self is inherited, otherwise, it is passed
+        to the bot unchanged.
         For configuration, self.botcfg is taken as a default, and a
-        dictionary made out of the non-Ellipsis is merged with that,
-        overriding any values from botcfg; that is used as the configuration
-        for the new bot.
+        dictionary made out of the non-Ellipsis arguments is merged with
+        that, overriding any values from botcfg; that is used as the
+        configuration for the new bot.
         May raise a TypeError if self.botcls is None.
         """
         with self.lock:
@@ -2164,6 +2190,24 @@ class BotManager(object):
             if roomname is not Ellipsis: cfg['roomname'] = roomname
             if passcode is not Ellipsis: cfg['passcode'] = passcode
             if nickname is not Ellipsis: cfg['nickname'] = nickname
+            if logger is Ellipsis:
+                rn = None if roomname is Ellipsis else roomname
+                nn = None if nickname is Ellipsis else nickname
+                if not rn:
+                    if not nn:
+                        name = '<bot>'
+                    else:
+                        name = nn
+                else:
+                    if not nn:
+                        name = '<bot>@' + rn
+                    else:
+                        name = nn + '@' + rn
+                cfg['logger'] = logging.getLogger(name)
+            elif logger is None:
+                cfg['logger'] = self.logger
+            else:
+                cfg['logger'] = logger
         return cls(**cfg)
 
     def add_bot(self, bot):
@@ -2268,7 +2312,11 @@ def run_main(**config):
     run_main(**config) -> None
 
     Initialize a BotManager, seed it with configuration from command-line
-    arguments, and call its main() method.
+    arguments, and call its main() method. Apart from values passed through
+    to the BotManager constructor, the following configuration values are
+    provided:
+    mgrcls: Bot manager class to use. Defaults to the "bare" BotManager.
+    argv  : List of positional arguments to parse (defaults to sys.argv[1:]).
     """
     mgrcls = config.get('mgrcls', BotManager)
     mgrcls.early_init(config)
@@ -2282,3 +2330,13 @@ def run_main(**config):
     except KeyboardInterrupt:
         inst.shutdown()
         inst.join()
+
+def run_minibot(**config):
+    """
+    run_minibot(**config) -> None
+
+    Wrapper aroung run_main(), supplying the MiniBot class as a default for
+    the botcls argument.
+    """
+    config.setdefault('botcls', MiniBot)
+    run_main(**config)
