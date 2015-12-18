@@ -1567,7 +1567,7 @@ class LoggingEndpoint(HeimEndpoint):
                            'edit-message-event', 'send-event'):
             self._run_chat_handlers(packet, {
                 'own': packet.type.endswith('-reply'),
-                'edit': packet.type.startswith('send-'),
+                'edit': packet.type.startswith('edit-'),
                 'long': False,
                 'raw': packet,
                 'self': self})
@@ -1601,10 +1601,10 @@ class LoggingEndpoint(HeimEndpoint):
         Invoked for every "live" chat message received.
         msg is the Message being dealt with; meta is a dict storing certain
         properties of the message:
-        own  :  Whether the message is an own message (either from a command
+        own   : Whether the message is an own message (either from a command
                 reply, or (in case of get-message) from the same session ID
                 as the current one).
-        edit :  Whether the message comes from an edit-event or -reply (i.e.,
+        edit  : Whether the message comes from an edit-event or -reply (i.e.,
                 whether the messages was edited post factum).
         long  : Whether the message comes from a get-message-reply and has
                 the entire (possibly long) content in it (check the truncated
@@ -1726,7 +1726,7 @@ class BaseBot(LoggingEndpoint):
             parts = parse_command(msg.text)
             self.logger.info('Got command: ' + ' '.join(map(repr, parts)))
             meta = {'line': msg.text, 'msg': msg, 'msg_meta': meta,
-                    'packet': meta['packet'], 'msgid': msg.id}
+                    'msgid': msg.id, 'packet': meta['packet']}
             self.handle_command(parts, meta)
             self._run_command_handlers(None, cmdline, meta)
             cmd = parts[0][1:]
@@ -1808,12 +1808,14 @@ class Bot(BaseBot):
                     be None as well. Defaults to Ellipsis, which means the
                     value of ping_text will be used.
     short_help    : A short (preferably one-line) message to reply with to a
-                    !help command. May be None to ignore the command, as the
-                    default is.
+                    !help command. May be None to ignore the command. The
+                    default is the class attribute SHORT_HELP, which defaults
+                    to None.
     long_help     : Message to reply with to a specific !help command. May be
                     long and elaborate, of whichever style is appropriate, or
-                    None not to reply at all. Defaults to Ellipsis, so that
-                    short_help is used instead.
+                    None not to reply at all; if Ellipsis, short_help is used
+                    instead. The default is the class attribute LONG_HELP,
+                    which itself defaults to Ellipsis.
     do_uptime     : Boolean indicating whether the !uptime command should be
                     replied to. Defaults to True.
     do_gen_uptime : Boolean indicating whether the generic !uptime command
@@ -1828,14 +1830,20 @@ class Bot(BaseBot):
                     time when the constructor was called.
     """
 
+    # Default short_help value.
+    SHORT_HELP = None
+
+    # Default long_help value.
+    LONG_HELP = Ellipsis
+
     def __init__(self, roomname=None, **config):
         "Initializer. See class docstring for invocation details."
         BaseBot.__init__(self, roomname, **config)
         self.do_stdcommands = config.get('do_stdcommands', True)
         self.ping_text = config.get('ping_text', 'Pong!')
         self.spec_ping_text = config.get('spec_ping_text', Ellipsis)
-        self.short_help = config.get('short_help', None)
-        self.long_help = config.get('long_help', Ellipsis)
+        self.short_help = config.get('short_help', self.SHORT_HELP)
+        self.long_help = config.get('long_help', self.LONG_HELP)
         self.do_uptime = config.get('do_uptime', True)
         self.do_gen_uptime = config.get('do_gen_uptime', False)
         self.aliases = config.get('aliases', [])
@@ -1922,6 +1930,7 @@ class MiniBot(Bot):
        msg     : The Message the text matched came from.
        msg_meta: Meta-data about msg, as described in handle_chat() in
                  LoggingEndpoint.
+       msgid   : The ID of msg.
        packet  : The packet the message was from.
        (Steps 2 and 3 are skipped in this case.)
     2. If the object is not callable, but a tuple or list of strings, step 3
@@ -1970,7 +1979,8 @@ class MiniBot(Bot):
         """
         if callable(value):
             value = value(match, {'self': self, 'msg': msg,
-                'msg_meta': meta, 'packet': meta['packet']})
+                'msg_meta': meta, 'msgid': msg.id,
+                'packet': meta['packet']})
             expand = False
         else:
             expand = True
