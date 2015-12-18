@@ -2009,7 +2009,9 @@ class BotManager(object):
     botcfg         : Dictionary of configuration values to pass to
                      newly-created bots. Defaults to the keyword argument
                      dictionary itself, simplifying combined configuration.
-    botname        : A symbolic name of the bot. Defaults to '<Bot>'.
+    botname        : A symbolic name of the bot. Defaults to '<Bot>', unless
+                     botcls is specified and has a BOTNAME attribute (whose
+                     value is used in that case).
     bots           : A list of bots to be used. The manager attribute of all
                      entries will be re-assigned to self. Defaults to an
                      empty list.
@@ -2089,6 +2091,11 @@ class BotManager(object):
             value = getattr(options, name)
             if value is not None:
                 config[name] = value
+        if 'botname' not in config and 'botcls' in config:
+            try:
+                config['botname'] = config['botcls'].BOTNAME
+            except AttributeError:
+                pass
         return (arguments, config)
 
     @classmethod
