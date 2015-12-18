@@ -27,29 +27,33 @@ def waiter(inst, cond):
                 inst.lonely_message = None
                 inst.conjure = False
 
-# Main class.
-class TumbleWeed(basebot.ThreadedBot):
-    NAME = 'TumbleWeed'
-    NICK_NAME = 'tumbleweed'
+# Main class. Extends BaseBot as botrulez are not provided.
+class TumbleWeed(basebot.BaseBot):
+
+    # Name for logging.
+    BOTNAME = 'Tumbleweed'
+
+    # Default nick-name.
+    NICKNAME = 'tumbleweed'
 
     # Constructor. Not particularly interesting.
     def __init__(self, *args, **kwds):
-        basebot.ThreadedBot.__init__(self, *args, **kwds)
-        self.cond = threading.Condition()
+        basebot.BaseBot.__init__(self, *args, **kwds)
+        self.cond = threading.Condition(self.lock)
         self.has_message = False
         self.sent_comment = False
         self.lonely_message = None
         self.conjure = False
 
     # Chat handler. Informs the background thread about new messages.
-    def handle_chat(self, info, message):
-        if info['sender'] == self.nickname: return
-        if info['content'] == '!conjure @' + self.nickname:
+    def handle_chat(self, msg, meta):
+        if msg.sender.name == self.nickname: return
+        if msg.content == '!conjure @' + self.nickname:
             self.conjure = True
         with self.cond:
             self.has_message = True
             if self.sent_comment or self.conjure:
-                self.lonely_message = info['id']
+                self.lonely_message = msg.id
             else:
                 self.lonely_message = None
             self.sent_comment = False
@@ -62,6 +66,6 @@ class TumbleWeed(basebot.ThreadedBot):
 
 # Main function. Calls basebot.run_main()
 def main():
-    basebot.run_main(TumbleWeed, sys.argv[1:])
+    basebot.run_main(botcls=TumbleWeed)
 
 if __name__ == '__main__': main()
