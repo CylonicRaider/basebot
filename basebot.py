@@ -2335,7 +2335,7 @@ def run_minibot(**config):
     """
     run_minibot(**config) -> None
 
-    Wrapper aroung run_main(), supplying the MiniBot class as a default for
+    Wrapper around run_main(), supplying the MiniBot class as a default for
     the botcls argument.
     """
     config.setdefault('botcls', MiniBot)
