@@ -532,7 +532,10 @@ class UserList(object):
                     continue
                 self._list.remove(orig)
                 self._by_agent_id.get(orig.id, []).remove(orig)
-                self._by_name.get(orig.name, []).remove(orig)
+                try:
+                    self._by_name.get(orig.name, []).remove(orig)
+                except ValueError:
+                    pass
 
     def remove_matching(self, pattern):
         """
@@ -650,7 +653,7 @@ class MessageTree(object):
 
         Incorporate all the messages in lst into self.
         """
-        sorts = set()
+        sorts = {}
         with self._lock:
             for msg in lst:
                 self._messages[msg.id] = msg
@@ -660,9 +663,8 @@ class MessageTree(object):
                     self._earliest = msg
                 if self._latest is None or self._latest.id <= msg.id:
                     self._latest = msg
-                sorts.add(c)
-            for l in sorts:
-                l.sort(key=lambda m: m.id)
+                sorts[id(c)] = c
+            for l in sorts.values(): l.sort()
 
     def clear(self):
         """
@@ -906,7 +908,10 @@ class HeimEndpoint(object):
         Internal back-end for close(). Takes care of synchronization.
         ok can be used to specify whether this was a "clean" close.
         """
-        self.logger.info('Closing...')
+        if ok:
+            self.logger.info('Closing...')
+        else:
+            self.logger.info('Closing!')
         with self._conncond:
             while self._connecting:
                 self._conncond.wait()
@@ -1064,7 +1069,8 @@ class HeimEndpoint(object):
         try:
             packet = self._postprocess_packet(packet)
         except KeyError:
-            pass
+            import traceback
+            traceback.print_exc()
         with self.lock:
             # Global handler.
             self.handle_early(packet)
@@ -1084,7 +1090,7 @@ class HeimEndpoint(object):
             elif t == 'send-event'        : self.on_send_event(p)
             elif t == 'snapshot-event'    : self.on_snapshot_event(p)
             # Special built-in handler.
-            if i is not None and t.endswith('-reply'): self.handle_reply(p)
+            if t is not None and t.endswith('-reply'): self.handle_reply(p)
             # Typeless handlers
             self._run_handlers(None, packet)
             # Type handlers
@@ -1120,8 +1126,11 @@ class HeimEndpoint(object):
                               for e in packet['data']]
         elif tp == 'hello-event':
             data = packet['data']
-            data['account'] = self._postprocess_personalaccountview(
-                data['account'])
+            try:
+                data['account'] = self._postprocess_personalaccountview(
+                    data['account'])
+            except KeyError:
+                pass
             data['session'] = self._postprocess_sessionview(data['session'])
         elif tp in ('join-event', 'part-event'):
             packet['data'] = self._postprocess_sessionview(packet['data'])
@@ -1180,7 +1189,7 @@ class HeimEndpoint(object):
         handle().
         """
         if packet.type == 'nick-reply':
-            self.eff_nickname = packet.to
+            self.eff_nickname = packet.data['to']
 
     def on_bounce_event(self, packet):
         """
@@ -1212,7 +1221,7 @@ class HeimEndpoint(object):
         """
         # Not mentioned in the API docs (last time I checked), but this
         # packet is the *very* first one the server sends.
-        self.session_id = packet.session.session_id
+        self.session_id = packet.data['session'].session_id
 
     def on_join_event(self, packet):
         """
@@ -1439,9 +1448,9 @@ class HeimEndpoint(object):
                 reconn = False
         if reconn: self.reconnect()
 
-    def set_nickname(self, nick=None):
+    def set_nickname(self, nick=Ellipsis):
         """
-        set_nickname(nick=None) -> msgid or None
+        set_nickname(nick=Ellipsis) -> msgid or None
 
         Set the nickname attribute to nick (unless nick is Ellipsis), and
         send a corresponding command to the server (if connected, and
@@ -1486,6 +1495,7 @@ class HeimEndpoint(object):
             self.handle_loop()
         except Exception:
             ok = False
+            raise
         finally:
             self._disconnect(ok)
 
@@ -1543,7 +1553,7 @@ class LoggingEndpoint(HeimEndpoint):
                         'server_id': packet.data['server_id'],
                         'server_era': packet.data['server_era']})
             elif packet.type == 'nick-event':
-                usr = self.users.for_session_id(packet.data['session_id'])
+                usr = self.users.for_session(packet.data['session_id'])
                 usr.name = packet.data['to']
             elif packet.type == 'join-event':
                 self.users.add(packet.data)
@@ -1565,17 +1575,17 @@ class LoggingEndpoint(HeimEndpoint):
         HeimEndpoint.handle_any(self, packet)
         if packet.type in ('edit-message-reply', 'send-reply',
                            'edit-message-event', 'send-event'):
-            self._run_chat_handlers(packet, {
+            self._run_chat_handlers(packet.data, {
                 'own': packet.type.endswith('-reply'),
                 'edit': packet.type.startswith('edit-'),
                 'long': False,
-                'raw': packet,
+                'packet': packet,
                 'self': self})
         elif packet.type == 'get-message-reply':
             sid = packet.data.sender.session_id
             self._run_chat_handlers(packet.data, {
                 'own': (sid == self.session_id), 'edit': False,
-                'long': True, 'raw': packet, 'self': self})
+                'long': True, 'packet': packet, 'self': self})
         elif packet.type == 'log-reply':
             self.handle_logs(packet.data['log'],
                 {'snapshot': False, 'raw': packet, 'self': self})
@@ -1722,15 +1732,15 @@ class BaseBot(LoggingEndpoint):
         (Overriding same-named method from LoggingEndpoint.)
         """
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
-        if msg.text.startswith('!'):
-            parts = parse_command(msg.text)
+        if msg.content.startswith('!'):
+            parts = parse_command(msg.content)
             self.logger.info('Got command: ' + ' '.join(map(repr, parts)))
-            meta = {'line': msg.text, 'msg': msg, 'msg_meta': meta,
+            meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
                     'msgid': msg.id, 'packet': meta['packet']}
             self.handle_command(parts, meta)
-            self._run_command_handlers(None, cmdline, meta)
+            self._run_command_handlers(None, parts, meta)
             cmd = parts[0][1:]
-            if cmd: self._run_command_handlers(cmd, cmdline, meta)
+            if cmd: self._run_command_handlers(cmd, parts, meta)
 
     def _run_command_handlers(self, cmd, cmdline, meta):
         """
@@ -1965,7 +1975,7 @@ class MiniBot(Bot):
             if not m: continue
             if not logged:
                 self.logger.info('Trigger message: %r' % text)
-                logged = Tue
+                logged = True
             self._process_callbacks(msg, meta, m, v)
             if not self.match_all:
                 return
@@ -1992,7 +2002,7 @@ class MiniBot(Bot):
             rlist = (value,)
         for v in rlist:
             if expand: v = match.expand(v)
-            self.send_chat(v, meta['packet'].id)
+            self.send_chat(v, msg.id)
 
 class BotManager(object):
     """
@@ -2182,7 +2192,7 @@ class BotManager(object):
                 self._joincond.wait()
 
     def make_bot(self, roomname=Ellipsis, passcode=Ellipsis,
-                 nickname=Ellipsis, _logger=Ellipsis):
+                 nickname=Ellipsis, logger=Ellipsis):
         """
         make_bot(roomname=Ellipss, passcode=Ellipsis, nickname=Ellipsis,
                  logger=Ellipsis) -> botcls instance
@@ -2210,6 +2220,7 @@ class BotManager(object):
             if logger is Ellipsis:
                 rn = None if roomname is Ellipsis else roomname
                 nn = None if nickname is Ellipsis else nickname
+                nn = nn or self.botname
                 if not rn:
                     if not nn:
                         name = '<bot>'
@@ -2314,7 +2325,7 @@ class BotManager(object):
             if bot:
                 self.remove_bot(bot)
 
-    def main():
+    def main(self):
         """
         main() -> None
 
