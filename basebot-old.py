@@ -1,5 +1,41 @@
 # -*- coding: ascii -*-
 
+"""
+Bot library for euphoria.io.
+
+For quick and simple bots, see run_minibot(); for more sophisticated ones,
+use ThreadedBot (Bot is very similar, but not thread-safe) with run_main().
+
+EXAMPLE OF run_minibot():
+>>> import sys, basebot
+>>> def frobnicator(match, info):
+>>>     return match.group(1)[::-1] # Reply with the string reversed.
+>>> if __name__ == '__main__':
+>>>     basebot.run_minibot(sys.argv[1:], botname='TestBot', nickname='test',
+>>>         short_help='This is a test bot. For a bit more behavior, try '
+>>>             'posting a message with a single "test" at the beginning.',
+>>>         regexes={'^test$': 'Test!', '^test (.+)$': frobnicator})
+
+EXAMPLE OF BOT CLASS + run_main():
+>>> import sys, basebot
+>>> class TestBot(basebot.ThreadedBot):
+>>>     def handle_chat(self, info, message):
+>>>         # Handle standard commands (returns True if actually handled).
+>>>         if self.handle_commands(info, message, short_help='This is a '
+>>>                 'test bot. For a bit more behavior, try posting a '
+>>>                 'message with a single "test" at the beginning.'):
+>>>             return
+>>>         # The textual content of the message;
+>>>         # the message ID to reply to.
+>>>         text, reply_id = info['content'], info['id']
+>>>         if text == 'test':
+>>>             self.send_chat('Test!', reply_id)
+>>>         elif text.startswith('test '):
+>>>             self.send_chat(text[5:][::-1], reply_id)
+>>> if __name__ == '__main__':
+>>>     basebot.run_main(TestBot, sys.argv[1:])
+"""
+
 # Base class for Euphoria chat bots.
 # Based on a closed GitHub project.
 # See http://github.com/euphoria-io/heim/wiki for further information
@@ -17,7 +53,7 @@ import websocket
 from websocket import WebSocketException as WSException
 
 # Regex for mentions.
-MENTION_RE = re.compile('\B@([^\s]+?(?=$|[,.!?:;&\'\s]|&#39;|&quot;|&amp;))')
+MENTION_RE = re.compile('\B@([^\s]+?(?=$|[,.!?;&<>\'\"\s]))')
 
 # Regex for whitespace.
 WHITESPACE_RE = re.compile('[^\S]')
@@ -58,28 +94,30 @@ def extract_message_data(m):
 
     Extract possibly interesting data from the message m as a dictionary.
     Included items:
-    'sender'   : Nickname of the sender of the message.
-    'nsender'  : Normalized nickname of the sender of the message.
-    'sender_id': ID of the sender of the message.
-    'session'  : Session ID of the sender.
-    'content'  : The content of the message.
-    'id'       : The ID of the message (like for replies).
-    'parent'   : The ID of the parent of the message.
-    'mentions' : A set of all names @-mentioned in the message.
-    'raw'      : The raw message.
+    'sender'     : Nickname of the sender of the message.
+    'nsender'    : Normalized nickname of the sender of the message.
+    'sender_id'  : ID of the sender of the message.
+    'session'    : Session ID of the sender.
+    'content'    : The content of the message (empty string if none).
+    'raw_content': The content of the message (None if none).
+    'id'         : The ID of the message (like for replies).
+    'parent'     : The ID of the parent of the message.
+    'mentions'   : A set of all names @-mentioned in the message.
+    'raw'        : The raw message.
 
     See also: normalize_nick() for nickname normalization.
     """
-    d = m.get('data', {})
+    d = m.get('data') or {}
     s = d.get('sender', {})
     c = d.get('content')
     p = d.get('parent')
     n = s.get('name')
+    i = c or ''
     if not p: p = None # In case p is the empty string.
-    return {'id': d.get('id'), 'parent': p, 'content': c,
+    return {'id': d.get('id'), 'parent': p, 'content': i, 'raw_content': c,
             'sender': n, 'nsender': normalize_nick(n) if n else None,
             'sender_id': s.get('id'), 'session': s.get('session_id'),
-            'mentions': set(scan_mentions(c)), 'raw': m}
+            'mentions': set(scan_mentions(i)), 'raw': m}
 def normalize_nick(nick):
     """
     normalize_nick(nick) -> str
@@ -88,6 +126,58 @@ def normalize_nick(nick):
     normalizations with it.
     """
     return WHITESPACE_RE.sub('', nick).lower()
+
+def format_datetime(timestamp, fractions=True):
+    """
+    format_datetime(timestamp, fractions=True) -> str
+
+    Produces a string representation of the timestamp similar to
+    the ISO 8601 format: "YYYY-MM-DD HH:MM:SS.FFF UTC". If fractions
+    is false, the ".FFF" part is omitted. As the platform the bots
+    are used on is international, there is little point to use any kind
+    of timezone but UTC.
+
+    See also: format_delta()
+    """
+    ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(timestamp))
+    if fractions: ts += '.%03d' % (int(timestamp * 1000) % 1000)
+    return ts + ' UTC'
+def format_delta(delta, fractions=True):
+    """
+    format_delta(delta, fractions=True) -> str
+
+    Format a time difference. delta is a numeric value holding the time
+    difference to be formatted in seconds. The return value is composed
+    like that: "[- ][Xd ][Xh ][Xm ][X[.FFF]s]", with the brackets indicating
+    possible omission. If fractions is False, or the given time is an
+    integer, the fractional part is omitted. All components are included as
+    needed, so the result for 3600 would be "1h". As a special case, the
+    result for 0 is "0s" (instead of nothing).
+
+    See also: format_datetime()
+    """
+    if not fractions:
+        delta = int(delta)
+    if delta == 0: return '0s'
+    ret = []
+    if delta < 0:
+        ret.append('-')
+        delta = -delta
+    if delta >= 86400:
+        ret.append('%dd' % (delta // 86400))
+        delta %= 86400
+    if delta >= 3600:
+        ret.append('%dh' % (delta // 3600))
+        delta %= 3600
+    if delta >= 60:
+        ret.append('%dm' % (delta // 60))
+        delta %= 60
+    if delta != 0:
+        if delta % 1 != 0:
+            ret.append('%ss' % round(delta, 3))
+        else:
+            ret.append('%ds' % delta)
+    return ' '.join(ret)
 
 # Main class.
 class Bot(object):
@@ -110,10 +200,16 @@ class Bot(object):
                     variable "BASEBOT_ROOM_FORMAT" is tried, if that does
                     not exist, the module-level default ROOM_FORMAT is
                     taken.
+    rename_logger : Allows to re-assign the logger instance variable
+                    when the room changes (will use the result of
+                    logging.getLogger(roomname) as the logger). If not set,
+                    the instance variable logger will never be changed.
+    starttime     : The floating-point UNIX timestamp of the instantiation
+                    of the bot. Used for !uptime.
 
-    Interesting class variables:
+    Interesting class variables (both to be overridden by subclasses):
     NAME     : The "name" of the bot to be used for logging (and similar
-               purposes)
+               purposes).
     NICK_NAME: The default nickname for new instances of the bot.
 
     Class usage:
@@ -121,6 +217,9 @@ class Bot(object):
     that let be run by calling run().
     >>> b = BotClass(roomname)
     >>> b.run()
+    Alternatively, in particular for running from the command line,
+    run_main() can be used; apart from instantiation, it also configures
+    logging.
     """
 
     # Name for logging.
@@ -138,21 +237,23 @@ class Bot(object):
         self.roomname = roomname
         self.password = password
         self.nickname = self.NICK_NAME
+        self.starttime = time.time()
         self.room_format = None
         self.conn = None
         self.send_callbacks = {}
         self.users = {}
         self.users_nick = {}
         self.msgid = 0
+        self.rename_logger = True
         self.logger = logging
+        self._exiting = False
 
-    def connect(self, _n=6, _exc=None):
+    def _connect(self, _n=6, _exc=None):
         """
-        connect() -> None
+        _connect() -> None
 
-        Try to connect to the configured room.
-        Re-connection attempts are made five times if the connection
-        fails, after that, an exception is raised.
+        This is an internal back-end for connect().
+        Don't override this method.
         """
         if _n <= 0: raise _exc[1]
         try:
@@ -164,18 +265,74 @@ class Bot(object):
             url = room_format % self.roomname
             self.logger.info('Connecting to %s...' % url)
             self.conn = websocket.create_connection(url)
+            if self.rename_logger:
+                if self.nickname is None:
+                    self.logger = logging.getLogger(self.roomname)
+                else:
+                    self.logger = logging.getLogger('%s@%s' %
+                        (self.nickname, self.roomname))
         except WSException:
             self.logger.exception('Connection lost; will retry '
                 'in 10 seconds...')
             time.sleep(10)
-            self.connect(_n - 1, sys.exc_info())
+            self._connect(_n - 1, sys.exc_info())
         except IOError as e:
             self.logger.exception('I/O error; will retry '
                 'in 10 seconds...')
             time.sleep(10)
-            self.connect(_n - 1, sys.exc_info())
+            self._connect(_n - 1, sys.exc_info())
         else:
             self.msgid = 0
+
+    def connect(self):
+        """
+        connect() -> None
+
+        Try to connect to the configured room.
+        Re-connection attempts are made five times if the connection
+        fails, after that, an exception is raised.
+
+        This method is called to estabilish a connection to a (new)
+        room; you can override it you need to hook it.
+        """
+        return self._connect()
+
+    def disconnect(self, final=False):
+        """
+        disconnect(final=False) -> None
+
+        Break this bot's connection. If final is false, nothing in
+        particular happens, and the connection is estabilished
+        again after some time. If final is true, a flag is set
+        indicating the bot should not try to re-connect, but rather
+        exit.
+        This method is asynchronous. Use other means to determine
+        when the bot is online again.
+        """
+        if final: self._exiting = True
+        self.conn.close()
+        self.conn = None
+
+    def exit(self):
+        """
+        exit() -> None
+
+        Shorthand for disconnect(True).
+        """
+        return disconnect(True)
+
+    def change_room(self, roomname, password=None):
+        """
+        change_room(self, roomname, password=None) -> None
+
+        Switch this bot to another room, so, make is disconnect from
+        the current room, and re-connect to another one.
+        This method is asynchronous. Use other means to determine
+        when the bot is online again.
+        """
+        self.roomname = roomname
+        self.password = password
+        self.disconnect()
 
     def send_raw(self, data):
         """
@@ -248,16 +405,25 @@ class Bot(object):
 
     def set_nickname(self, name=None):
         """
-        set_nickname(name=None) -> id
+        set_nickname(name=None) -> id or None
 
         Set the specified nickname. If name is None, set the pre-configured
         nickname. If THAT is None, do not send a nickname at all. The
-        pre-configured nickname is updated to reflect the change.
+        pre-configured nickname is updated to reflect the change. If the
+        special value Ellipsis is given as name, then the nickname is
+        reset and no such will be set at the next connect. The return
+        value is either the ID of the message sent to inform the server
+        of the nickname change, or None if currently not connected.
         """
         if name is None: name = self.nickname
         if name is None: return
-        self.nickname = name
-        self.logger.info('Setting nickname: %r' % (name,))
+        if name is Ellipsis:
+            self.logger.info('Resetting nickname')
+            self.nickname = None
+        else:
+            self.logger.info('Setting nickname: %r' % (name,))
+            self.nickname = name
+        if self.conn is None: return None
         return self.send_msg('nick', name=name)
 
     def handle_incoming(self, message):
@@ -452,6 +618,76 @@ class Bot(object):
         self.update_user(data['session_id'], id=data.get('id'),
                          name=data.get('to'), last_seen=Ellipsis)
 
+    def handle_commands(self, info, message, do_ping=True, do_spec_ping=None,
+                        do_uptime=True, short_help=None, long_help=None,
+                        nick_alias=None):
+        """
+        handle_commands(info, message, do_ping=True, do_spec_ping=None,
+                        do_uptime=True, short_help=None, long_help=None,
+                        nick_alias=None) -> bool
+
+        Handler for "standard commands", that are:
+        !ping        : Generic responsiveness test. Reply is a single
+                       "Pong!". Controlled by the do_ping argument.
+        !ping @nick  : Responsiveness test for an individual bot. Controlled
+                       by the do_spec_ping argument, if that is None (or
+                       omitted), do_ping is used.
+        !help        : Generic help request. Responses should be short, very
+                       preferably one-liners, with mention of the specific
+                       help command if necessary. The response is specified
+                       by short_help, if that is None, the command is
+                       ignored.
+        !help @nick  : Specific help request. The response is given by either
+                       the long_help argument, or the short_help argument
+                       if the former is None (or omitted); if both are None,
+                       the command is ignored.
+        !uptime @nick: Returns a message about how long the bot is running.
+        Full usage of those commands is recommended.
+
+        The nick_alias parameter specifies an alternative nick-name to
+        respond to (useful for name-changing "gauge" bots).
+
+        The method is intended to be called from handle_chat(), it returns
+        whether a command has been processed.
+        """
+        def match(cmd, name):
+            # Command must match exactly.
+            if cnt[:len(cmd)] != cmd: return False
+            # Be a bit liberal with the nick-name.
+            return (normalize_nick(cnt[len(cmd):].strip()) ==
+                    normalize_nick('@' + name))
+        cnt = info['content']
+        if nick_alias is None:
+            check = lambda cmd: (match(cmd, self.nickname))
+        else:
+            check = lambda cmd: (match(cmd, self.nickname) or
+                                 match(cmd, nick_alias))
+        if cnt == '!ping':
+            if do_ping:
+                self.send_chat('Pong!', info['id'])
+                return True
+        elif check('!ping'):
+            if (do_ping if do_spec_ping is None else do_spec_ping):
+                self.send_chat('Pong!', info['id'])
+                return True
+        elif cnt == '!help':
+            if short_help:
+                self.send_chat(short_help, info['id'])
+                return True
+        elif check('!help'):
+            text = long_help or short_help
+            if text:
+                self.send_chat(text, info['id'])
+                return True
+        elif check('!uptime'):
+            if do_uptime:
+                ts = time.time()
+                self.send_chat('/me is up since %s (%s)' %
+                    (format_datetime(self.starttime),
+                    format_delta(ts - self.starttime)), info['id'])
+                return True
+        return False
+
     def handle_chat(self, info, message):
         """
         handle_chat(info, message) -> None
@@ -490,11 +726,27 @@ class Bot(object):
         self.startup()
         while True:
             try:
-                raw = self.conn.recv()
+                try:
+                    raw = self.conn.recv()
+                except AttributeError:
+                    if self._exiting:
+                        self.logger.warning('Connection aborted; exiting...')
+                        self.shutdown()
+                        break
+                    else:
+                        self.logger.warning('Connection aborted; '
+                            're-connecting...')
+                        self.connect()
+                        self.login()
+                        continue
                 self.logger.debug('< %r' % (raw,))
                 data = json.loads(raw)
                 self.handle_incoming(data)
             except WSException:
+                if self._exiting:
+                    self.logger.warning('Connection lost; shutting down...')
+                    self.shutdown()
+                    break
                 self.logger.error('Connection lost; '
                     'reconnecting in 10sec...')
                 time.sleep(10)
@@ -538,11 +790,45 @@ class ThreadedBot(Bot):
         self.lock = threading.RLock()
 
     def __enter__(self):
-        if self.lock is not None:
-            return self.lock.__enter__()
+        return self.lock.__enter__()
     def __exit__(self, *args):
-        if self.lock is not None:
-            return self.lock.__exit__(*args)
+        return self.lock.__exit__(*args)
+
+    def connect(self):
+        """
+        connect() -> None
+
+        See Bot.connect() for usage.
+        """
+        with self:
+            return Bot.connect(self)
+
+    def disconnect(self, final=False):
+        """
+        disconnect(final=False) -> None
+
+        See Bot.disconnect() for usage.
+        """
+        with self:
+            return Bot.disconnect(self, final)
+
+    def change_room(self, roomname, password=None):
+        """
+        change_room(roomname, password=None) -> None
+
+        See Bot.change_room() for usage.
+        """
+        with self:
+            return Bot.change_room(self, roomname, password)
+
+    def set_nickname(self, nickname=None):
+        """
+        set_nickname(name=None) -> id or None
+
+        See Bot.set_nickname() for usage.
+        """
+        with self:
+            return Bot.set_nickname(self, nickname)
 
     def update_user(self, session, **data):
         """
@@ -594,6 +880,8 @@ class MiniBot(ThreadedBot):
         self.setup = kwds.get('setup', None)
         self.callback = kwds.get('callback', None)
         self.do_ping = kwds.get('do_ping', True)
+        self.do_spec_ping = kwds.get('do_spec_ping', None)
+        self.do_uptime = kwds.get('do_uptime', True)
         self.short_help = kwds.get('short_help', None)
         self.long_help = kwds.get('long_help', None)
         if self.setup: self.setup(self)
@@ -603,16 +891,9 @@ class MiniBot(ThreadedBot):
         See Bot.handle_chat() for details.
         """
         cnt = info['content']
-        if cnt == '!ping' or cnt == '!ping @' + self.nickname:
-            if self.do_ping:
-                self.send_chat('Pong!', info['id'])
-        elif cnt == '!help':
-            if self.short_help:
-                self.send_chat(self.short_help, info['id'])
-        elif cnt == '!help @' + self.nickname:
-            helpstr = self.long_help or self.short_help
-            if helpstr:
-                self.send_chat(helpstr, info['id'])
+        self.handle_commands(info, message, do_ping=self.do_ping,
+            do_spec_ping=self.do_spec_ping, do_uptime=self.do_uptime,
+            short_help=self.short_help, long_help=self.long_help)
         replies = []
         if hasattr(self.regexes, 'keys'):
             for k in self.regexes:
@@ -663,7 +944,8 @@ def run_minibot(args, **config):
     run_minibot(args, **config) -> MiniBot
 
     Convenience functin for starting mini-bots. Uses an instance of the
-    MiniBot class. Configuration is done by keyword arguments:
+    MiniBot class. args is an argument tuple that is directly passed to
+    run_main(). Configuration is done by keyword arguments:
 
     botname   : Name to be used for logging.
     nickname  : Nickname to assume.
@@ -697,20 +979,28 @@ def run_minibot(args, **config):
                     item value as the remaining positional arguments (if it
                     is a tuple), or the item value as the second position
                     argument (if it is not a tuple).
-    setup     : A function called after the MiniBot instance is created. Can
-                set things up for other functions.
-    callback  : A function taking the following arguments:
-                - The MiniBot instance.
-                - The message info dictinary.
-                - The raw message.
-                - A list of replies already sent by regex handlers.
-    do_ping   : Boolean indicating whether to react to "!ping [@nickname]"
-                commands. Defaults to True.
-    short_help: Short help, displayed as a reponse to a "!help" command.
-                If None, or not given, the command is ignored.
-    long_help : Long help; displayed as a response to a "!help @nickname"
-                command; if this is not defined, but short_help is, the
-                latter is used for both comamnds.
+    setup       : A function called after the MiniBot instance is created. Can
+                  set things up for other functions.
+    callback    : A function taking the following arguments:
+                  - The MiniBot instance.
+                  - The message info dictinary.
+                  - The raw message.
+                  - A list of replies already sent by regex handlers.
+    do_ping     : Boolean indicating whether to react to "!ping" commands.
+                  Defaults to True.
+    do_spec_ping: Boolean indicating whether to react to "!ping @nick" commands.
+                  Defaults to do_ping.
+    do_uptime   : Boolean indicating whether to react to "!uptime @nick" commands.
+                  Defaults to True.
+    short_help  : Short help, displayed as a reponse to a "!help" command.
+                  If None, or not given, the command is ignored.
+    long_help   : Long help; displayed as a response to a "!help @nickname"
+                  command; if this is not defined, but short_help is, the
+                  latter is used for both comamnds.
+
+    See the module-level documentation for an example.
+
+    See also: Bot.handle_commands() for do_ping, do_spec_ping, do_uptime, *_help.
     """
     botname = config.get('botname', Bot.NAME)
     nickname = config.get('nickname', Bot.NICK_NAME)
@@ -741,6 +1031,8 @@ def run_main(cls, argv, **config):
     run_main), and its main() method is called; after that, the bot is
     returned. main() can be overridden to do nothing if only the bot
     instance is needed.
+
+    See the module-level documentation for an example.
     """
     # Apply arguments.
     if argv is not None:
@@ -777,6 +1069,10 @@ def run_main(cls, argv, **config):
     if l:
         b.logger = l
     elif roomname is not None:
-        b.logger = logging.getLogger(roomname)
+        nick = cls.NICK_NAME
+        if nick is None:
+            b.logger = logging.getLogger(roomname)
+        else:
+            b.logger = logging.getLogger('%s@%s' % (nick, roomname))
     b.run()
     return b

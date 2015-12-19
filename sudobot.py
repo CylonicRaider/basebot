@@ -4,17 +4,16 @@
 # @sudo -- (Humorous) Euphoria bot watching for messages starting with
 #          "sudo", and responding with "Permission denied".
 
-# For sys.argv; bot functionality.
-import sys
+# Obligatory import.
 import basebot
 
 # Main function. Could be omitted (but I prefer not to do).
 def main():
-    # sys.argv[1:]: Argument tuple.
-    # botname     : Name to use in logging.
-    # nickname    : Actual nick-name.
-    # regexes     : Mapping of regex-response pairs.
-    basebot.run_minibot(sys.argv[1:], botname='SudoBot', nickname='sudo',
+    # botname : Name to use in logging.
+    # nickname: Actual nick-name.
+    # regexes : Mapping of regex-response pairs.
+    basebot.run_minibot(botname='SudoBot', nickname='sudo',
+                        log_messages=True, log_users=True,
                         regexes={'^sudo\\b': '/me Permission denied.'})
 
 if __name__ == '__main__': main()
