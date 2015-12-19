@@ -3,8 +3,8 @@
 Simplicistic library for [euphoria.io](http://euphoria.io/) bots;
 with examples.
 
-*The library is being re-written for a possibly API-breaking update,
-see the `v2-rewrite` branch.*
+**This is the outdated v1 fork being kept for historical reasons.
+Please port your bots to the new fork in the master branch.**
 
 The actual library consists only of the `basebot.py` file (it depends
 on [`websocket-client`](http://pypi.python.org/pypi/websocket-client/),
