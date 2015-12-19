@@ -59,10 +59,10 @@ class TumbleWeed(basebot.BaseBot):
             self.sent_comment = False
             self.cond.notifyAll()
 
-    # Start-up method. Spawns the background thread.
-    def startup(self):
+    # Main method. Hooked to spawn the background thread.
+    def main(self):
         basebot.spawn_thread(waiter, self, self.cond)
-        basebot.ThreadedBot.startup(self)
+        basebot.Bot.main(self)
 
 # Main function. Calls basebot.run_main()
 def main():

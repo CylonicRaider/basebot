@@ -547,10 +547,10 @@ class UserList(object):
         value of 'test'. An empty pattern will remove all users.
         Used to implement the partition network-event.
         """
+        if not pattern:
+            self.clear()
+            return
         with self._lock:
-            if not pattern:
-                self.clear()
-                return
             rml, it = [], pattern.items()
             for i in self._list:
                 for k, v in it:
