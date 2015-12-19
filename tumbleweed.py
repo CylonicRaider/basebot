@@ -62,10 +62,10 @@ class TumbleWeed(basebot.BaseBot):
     # Main method. Hooked to spawn the background thread.
     def main(self):
         basebot.spawn_thread(waiter, self, self.cond)
-        basebot.Bot.main(self)
+        basebot.BaseBot.main(self)
 
 # Main function. Calls basebot.run_main()
 def main():
-    basebot.run_main(botcls=TumbleWeed)
+    basebot.run_main(TumbleWeed)
 
 if __name__ == '__main__': main()

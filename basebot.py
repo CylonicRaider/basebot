@@ -2335,17 +2335,20 @@ class BotManager(object):
         self.start()
         self.join()
 
-def run_main(**config):
+def run_main(botcls=Ellipsis, **config):
     """
-    run_main(**config) -> None
+    run_main(botcls=Ellipsis, **config) -> None
 
     Initialize a BotManager, seed it with configuration from command-line
-    arguments, and call its main() method. Apart from values passed through
-    to the BotManager constructor, the following configuration values are
-    provided:
+    arguments, and call its main() method. The botcls positional argument (if
+    not Ellipsis) is copied into config before starting. Apart from values
+    passed through to the BotManager constructor, the following configuration
+    values are provided:
     mgrcls: Bot manager class to use. Defaults to the "bare" BotManager.
     argv  : List of positional arguments to parse (defaults to sys.argv[1:]).
     """
+    if botcls is not Ellipsis:
+        config['botcls'] = botcls
     mgrcls = config.get('mgrcls', BotManager)
     mgrcls.early_init(config)
     parser = optparse.OptionParser()
