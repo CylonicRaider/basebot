@@ -1069,8 +1069,7 @@ class HeimEndpoint(object):
         try:
             packet = self._postprocess_packet(packet)
         except KeyError:
-            import traceback
-            traceback.print_exc()
+            pass
         with self.lock:
             # Global handler.
             self.handle_early(packet)
@@ -1198,8 +1197,11 @@ class HeimEndpoint(object):
         Built-in event packet handler. Used internally for the login
         procedure.
         """
-        if ('passcode' in packet.data.get('auth_options', ()) and
-                self.passcode is not None):
+        #if ('passcode' in packet.data.get('auth_options', ()) and
+        #        self.passcode is not None):
+        # Reporting of the possibility to authenticate using a passcode is
+        # NYI (as of 2015-12-19), so just try it:
+        if self.passcode is not None:
             self.set_passcode()
 
     def on_disconnect_event(self, packet):
@@ -1476,7 +1478,7 @@ class HeimEndpoint(object):
         """
         with self.lock:
             if code is not Ellipsis: self.passcode = code
-            if (self.get_connectin() is not None and
+            if (self.get_connection() is not None and
                     self.passcode is not None):
                 self.logger.info('Authenticating with passcode...')
                 return self.send_packet('auth', type='passcode',
@@ -1734,7 +1736,8 @@ class BaseBot(LoggingEndpoint):
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
         if msg.content.startswith('!'):
             parts = parse_command(msg.content)
-            self.logger.info('Got command: ' + ' '.join(map(repr, parts)))
+            self.logger.info('Got command: ' +
+                             ' '.join(map(repr, map(str, parts))))
             meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
                     'msgid': msg.id, 'packet': meta['packet']}
             self.handle_command(parts, meta)
@@ -1878,7 +1881,9 @@ class Bot(BaseBot):
         def nick_matches():
             if len(cmdline) != 2:
                 return False
-            nn = normalize_nick(cmdline[1])
+            ms = cmdline[1]
+            if not ms.startswith('@'): return False
+            nn = normalize_nick(ms[1:])
             if nn == normnick:
                 return True
             for i in self.aliases:
@@ -2189,7 +2194,8 @@ class BotManager(object):
         """
         with self.lock:
             while self.bots:
-                self._joincond.wait()
+                # Remain responsive in Py2K.
+                self._joincond.wait(10)
 
     def make_bot(self, roomname=Ellipsis, passcode=Ellipsis,
                  nickname=Ellipsis, logger=Ellipsis):
