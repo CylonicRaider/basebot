@@ -757,8 +757,13 @@ class HeimEndpoint(object):
     passcode    : Passcode for private rooms. Sent during (re-)connection.
                   Defaults to None; no passcode is sent in that case.
     retry_count : Amount of re-connection attempts until an operation (a
-                  connect or a send) fails.
+                  connect or a send) fails. Defaults to 4.
     retry_delay : Amount of seconds to wait before a re-connection attempt.
+                  Defaults to 10 seconds.
+    timeout     : (Low-level) Connection timeout. Defaults to 60 seconds (as
+                  the Heim server sends pings every 30 seconds, the
+                  connection is either dead after that time, or generally
+                  unstable).
     handlers    : Packet-type-to-list-of-callables mapping storing handlers
                   for incoming packets.
                   Handlers are called with the packet as the only argument;
@@ -818,6 +823,7 @@ class HeimEndpoint(object):
         self.passcode = config.get('passcode', None)
         self.retry_count = config.get('retry_count', 4)
         self.retry_delay = config.get('retry_delay', 10)
+        self.timeout = config.get('timeout', 60)
         self.handlers = config.get('handlers', {})
         self.logger = config.get('logger', logging.getLogger())
         self.manager = config.get('manager', None)
@@ -840,40 +846,70 @@ class HeimEndpoint(object):
     def __exit__(self, *args):
         return self.lock.__exit__(*args)
 
-    def _make_connection(self, url):
+    def _make_connection(self, url, timeout):
         """
-        _make_connection(url) -> JSONWebSocket
+        _make_connection(url, timeout) -> JSONWebSocket
 
-        Actually connect to url.
+        Actually connect to url, with a time-out setting of timeout.
         Returns the object produced, or raises an exception.
         Can be hooked by subclasses.
         """
         self.logger.info('Connecting to %s...' % url)
-        return JSONWebSocket(websocket.create_connection(url))
+        ret = JSONWebSocket(websocket.create_connection(url, timeout))
+        self.logger.info('Connected.')
+        return ret
 
-    def _attempt(self, func):
+    def _attempt(self, func, exchook=None):
         """
-        _attempt(func) -> object
+        _attempt(func, exchook=None) -> object
 
         Attempt to run func; if it raises an exception, re-try using the
         specified parameters (retry_count and retry_delay).
-        Func is called with two arguments, the zero-based trial counter,
-        and amount of re-tries that will be attempted.
+        func is called with three arguments, the zero-based trial counter,
+        and the amount of re-tries that will be attempted, and the exception
+        that happened during the last attempt, or None if none.
+        exchook (if not None) is called immediately after an exception is
+        caught, with the same arguments as func (and the exception object
+        filled in); it may re-raise the exception to abort instantly. If
+        exchook is None, a warning message will be logged.
         If the last attempt fails, the exception that indicated the
-        failure is raised.
+        failure is re-raised.
         If the function call succeeds, the return value of func is passed
         out.
         """
         with self.lock:
             count, delay = self.retry_count, self.retry_delay
+        exc = None
         for i in range(count + 1):
             if i: time.sleep(delay)
             try:
-                return func(i, count)
-            except Exception:
+                return func(i, count, exc)
+            except Exception as e:
+                exc = e
+                if exchook is None:
+                    self.logger.warning('Operation failed!', exc_info=True)
+                else:
+                    exchook(i, count, exc)
                 if i == count:
                     raise
                 continue
+
+    def _attempt_reconnect(self, func):
+        """
+        _attempt_reconnect(func) -> object
+
+        Same as _attempt(), but each repeated call of func is preceded to one
+        of _reconnect(). Additional rather internal modifications are
+        applied.
+        """
+        def callback(i, n, exc):
+            if i: self._reconnect()
+            return func(i, n, exc)
+        def exchook(i, n, exc):
+            if exc and i != n and not isinstance(exc, WSCCException):
+                self.logger.warning('Operation failed (%r); '
+                    'will re-connect...' % exc)
+        return self._attempt(callback, exchook)
 
     def _connect(self):
         """
@@ -890,9 +926,11 @@ class HeimEndpoint(object):
                 return
             self._connecting = True
             url = self.url_template.format(self.roomname)
+            timeout = self.timeout
         conn = None
         try:
-            conn = self._attempt(lambda c, a: self._make_connection(url))
+            conn = self._attempt(
+                lambda c, a, e: self._make_connection(url, timeout))
         finally:
             with self._conncond:
                 self._connecting = False
@@ -901,12 +939,14 @@ class HeimEndpoint(object):
                     self.handle_connect()
                 self._conncond.notifyAll()
 
-    def _disconnect(self, ok):
+    def _disconnect(self, ok, final):
         """
-        _disconnect(ok) -> None
+        _disconnect(ok, final) -> None
 
         Internal back-end for close(). Takes care of synchronization.
         ok can be used to specify whether this was a "clean" close.
+        final specifies whether this is a "final" close, after that
+        the bot will not try to re-connect.
         """
         if ok:
             self.logger.info('Closing...')
@@ -918,9 +958,9 @@ class HeimEndpoint(object):
             conn = self._connection
             self._connection = None
             if self._logged_in:
-                self.handle_logout(ok)
+                self.handle_logout(ok, final)
                 self._logged_in = False
-            self.handle_close(ok)
+            self.handle_close(ok, final)
             self._conncond.notifyAll()
         if conn is not None:
             conn.close()
@@ -941,13 +981,15 @@ class HeimEndpoint(object):
             if self._connection is not None:
                 return
             if self._logged_in:
-                self.handle_logout(False)
+                self.handle_logout(False, False)
                 self._logged_in = False
-            self.handle_close(False)
+            self.handle_close(False, False)
             self._connecting = True
+            url = self.url_template.format(self.roomname)
+            timeout = self.timeout
         conn = None
         try:
-            conn = self._make_connection(url)
+            conn = self._make_connection(url, timeout)
         finally:
             with self._conncond:
                 self._connecting = False
@@ -975,7 +1017,7 @@ class HeimEndpoint(object):
         Close the current connection (if any).
         Raises a websocket.WebSocketError is something unexpected happens.
         """
-        self._disconnect(True)
+        self._disconnect(True, True)
 
     def reconnect(self):
         """
@@ -1009,17 +1051,18 @@ class HeimEndpoint(object):
         """
         pass
 
-    def handle_close(self, ok):
+    def handle_close(self, ok, final):
         """
-        handle_close(ok) -> None
+        handle_close(ok, final) -> None
 
         Called after a connection failed (or was normally closed).
         The ok parameter tells whether the close was normal (ok is true)
-        or abnormal (ok is false).
+        or abnormal (ok is false); final tells whether the bot will try
+        to re-connect itself (final is false) or not (final is true).
         """
         self.eff_nickname = None
         self.session_id = None
-        if self.manager: self.manager.handle_close(self, ok)
+        if self.manager: self.manager.handle_close(self, ok, final)
 
     def recv_raw(self, retry=True):
         """
@@ -1032,7 +1075,8 @@ class HeimEndpoint(object):
         re-connects) before failing entirely.
         """
         if retry:
-            return self._attempt(lambda c, a: self.recv_raw(False))
+            return self._attempt_reconnect(
+                lambda c, a, e: self.recv_raw(False))
         conn = self.get_connection()
         if conn is None:
             raise NoConnectionError('Not connected')
@@ -1049,7 +1093,8 @@ class HeimEndpoint(object):
         re-connects) before failing entirely.
         """
         if retry:
-            return self._attempt(lambda c, a: self.send_raw(obj, False))
+            return self._attempt_reconnect(
+                lambda c, a, e: self.send_raw(obj, False))
         conn = self.get_connection()
         if conn is None:
             raise NoConnectionError('Not connected')
@@ -1340,9 +1385,9 @@ class HeimEndpoint(object):
         """
         pass
 
-    def handle_logout(self, ok):
+    def handle_logout(self, ok, final):
         """
-        handle_logout(ok) -> None
+        handle_logout(ok, final) -> None
 
         Called when a session ends or before a re-connect; before
         handle_close().
@@ -1497,9 +1542,10 @@ class HeimEndpoint(object):
             self.handle_loop()
         except Exception:
             ok = False
+            self.logger.error('Crashed!', exc_info=True)
             raise
         finally:
-            self._disconnect(ok)
+            self._disconnect(ok, True)
 
 class LoggingEndpoint(HeimEndpoint):
     """
@@ -1535,9 +1581,9 @@ class LoggingEndpoint(HeimEndpoint):
         self.users = UserList()
         self.messages = MessageTree()
 
-    def handle_close(self, ok):
+    def handle_close(self, ok, final):
         "See HeimEndpoint.handle_close() for details."
-        HeimEndpoint.handle_close(self, ok)
+        HeimEndpoint.handle_close(self, ok, final)
         self.users.clear()
         self.messages.clear()
 
@@ -2296,17 +2342,21 @@ class BotManager(object):
         with new.lock:
             new.manager = self
 
-    def handle_close(self, bot, ok):
+    def handle_close(self, bot, ok, final):
         """
-        handle_close(bot, ok) -> None
+        handle_close(bot, ok, final) -> None
 
         Invoked by bot when it closes; ok tells whether the close was
-        "clean". May respawn the bot if self is configured accordingly,
-        and (in particular) bot is an instance of self.botcls.
+        "clean"; final tells whether the bot will try to re-connect itself
+        (final is true) or not (final is false). May respawn the bot if
+        self is configured accordingly, and (in particular) bot is an
+        instance of self.botcls.
         """
         def respawner():
             time.sleep(timeout)
             b.main()
+        if not final:
+            return
         try:
             with self.lock:
                 if not isinstance(bot, self.botcls):
@@ -2330,6 +2380,8 @@ class BotManager(object):
         finally:
             if bot:
                 self.remove_bot(bot)
+                with self._joincond:
+                    self._joincond.notifyAll()
 
     def main(self):
         """
