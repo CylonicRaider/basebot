@@ -1993,6 +1993,9 @@ class MiniBot(Bot):
                  LoggingEndpoint.
        msgid   : The ID of msg.
        packet  : The packet the message was from.
+       reply   : A function that, taking a single string as an argument,
+                 sends a reply to the message that caused this call-back,
+                 with the given string as the contents.
        (Steps 2 and 3 are skipped in this case.)
     2. If the object is not callable, but a tuple or list of strings, step 3
        is performed on each element of it (in order), otherwise, on the
@@ -2039,9 +2042,10 @@ class MiniBot(Bot):
         Used internally.
         """
         if callable(value):
+            reply = lambda text: self.send_chat(text, msg.id)
             value = value(match, {'self': self, 'msg': msg,
                 'msg_meta': meta, 'msgid': msg.id,
-                'packet': meta['packet']})
+                'packet': meta['packet'], 'reply': reply})
             expand = False
         else:
             expand = True
