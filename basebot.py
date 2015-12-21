@@ -840,6 +840,8 @@ class HeimEndpoint(object):
         self._conncond = threading.Condition(self.lock)
         # Whether the session was properly initiated.
         self._logged_in = False
+        # Whether a nick-name was set for the first time.
+        self._nick_set = False
 
     def __enter__(self):
         return self.lock.__enter__()
@@ -955,11 +957,12 @@ class HeimEndpoint(object):
         with self._conncond:
             while self._connecting:
                 self._conncond.wait()
-            conn = self._connection
-            self._connection = None
             if self._logged_in:
                 self.handle_logout(ok, final)
                 self._logged_in = False
+            self._nick_set = False
+            conn = self._connection
+            self._connection = None
             self.handle_close(ok, final)
             self._conncond.notifyAll()
         if conn is not None:
@@ -983,6 +986,7 @@ class HeimEndpoint(object):
             if self._logged_in:
                 self.handle_logout(False, False)
                 self._logged_in = False
+            self._nick_set = False
             self.handle_close(False, False)
             self._connecting = True
             url = self.url_template.format(self.roomname)
@@ -1059,6 +1063,7 @@ class HeimEndpoint(object):
         The ok parameter tells whether the close was normal (ok is true)
         or abnormal (ok is false); final tells whether the bot will try
         to re-connect itself (final is false) or not (final is true).
+        If ok is true, messages may be sent.
         """
         self.eff_nickname = None
         self.session_id = None
@@ -1084,7 +1089,7 @@ class HeimEndpoint(object):
 
     def send_raw(self, obj, retry=True):
         """
-        send_raw(obj, retry=True( -> object
+        send_raw(obj, retry=True) -> object
 
         Try to send a single object over the connection.
         My raise a websocket.WebSocketException, or a NoConnectionError
@@ -1234,6 +1239,9 @@ class HeimEndpoint(object):
         """
         if packet.type == 'nick-reply':
             self.eff_nickname = packet.data['to']
+            if not self._nick_set:
+                self.handle_nick_set()
+                self._nick_set = True
 
     def on_bounce_event(self, packet):
         """
@@ -1381,7 +1389,22 @@ class HeimEndpoint(object):
 
         Called when a session is initialized (but before setting the
         nick-name, if any; after handle_connect()), or after a successful
-        re-connect. A session may not be estabilished at all.
+        re-connect. A session may not be estabilished at all for a connection
+        (like, when the bot tries to connect to a private room and does not
+        have appropriate credentials).
+        """
+        pass
+
+    def handle_nick_set(self):
+        """
+        handle_nick_set() -> None
+
+        Called after a session is estabilished, and a nick-name is set for
+        the first time.
+        May not be called at all for the reasons described in handle_login(),
+        or if no nick-name is set at all (during log-in); will however be
+        called if that happens later.
+        There is no counterpart method; use handle_logout() if necessary.
         """
         pass
 
@@ -1391,6 +1414,7 @@ class HeimEndpoint(object):
 
         Called when a session ends or before a re-connect; before
         handle_close().
+        If ok is true, messages may be sent.
         """
         pass
 
