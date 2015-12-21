@@ -13,7 +13,6 @@ def main():
     # nickname: Actual nick-name.
     # regexes : Mapping of regex-response pairs.
     basebot.run_minibot(botname='SudoBot', nickname='sudo',
-                        log_messages=True, log_users=True,
                         regexes={'^sudo\\b': '/me Permission denied.'})
 
 if __name__ == '__main__': main()
