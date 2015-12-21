@@ -1651,13 +1651,15 @@ class LoggingEndpoint(HeimEndpoint):
                 'own': packet.type.endswith('-reply'),
                 'edit': packet.type.startswith('edit-'),
                 'long': False,
+                'live': (packet.type == 'send-event'),
                 'packet': packet,
                 'self': self})
         elif packet.type == 'get-message-reply':
             sid = packet.data.sender.session_id
             self._run_chat_handlers(packet.data, {
                 'own': (sid == self.session_id), 'edit': False,
-                'long': True, 'packet': packet, 'self': self})
+                'long': True, 'live': False, 'packet': packet,
+                'self': self})
         elif packet.type == 'log-reply':
             self.handle_logs(packet.data['log'],
                 {'snapshot': False, 'raw': packet, 'self': self})
@@ -1691,6 +1693,9 @@ class LoggingEndpoint(HeimEndpoint):
         long  : Whether the message comes from a get-message-reply and has
                 the entire (possibly long) content in it (check the truncated
                 member of the message, just to be sure).
+        live  : Equivalent to the expression (not own and not edit and
+                not long). Useful for testing whether this is a "live"
+                message to be replied to.
         packet: The packet the message originated from.
         self  : The LoggingEndpoint instance this command is invoked from.
         """
