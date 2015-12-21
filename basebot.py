@@ -1809,7 +1809,7 @@ class BaseBot(LoggingEndpoint):
         (Overriding same-named method from LoggingEndpoint.)
         """
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
-        if msg.content.startswith('!'):
+        if msg.content.startswith('!') and meta['live']:
             parts = parse_command(msg.content)
             self.logger.info('Got command: ' +
                              ' '.join(map(repr, map(str, parts))))
@@ -2050,7 +2050,8 @@ class MiniBot(Bot):
 
     def handle_chat(self, msg, meta):
         "See Bot.handle_chat() for details."
-        if not self.match_self and meta['own']:
+        if (not self.match_self and meta['own'] or
+                meta['edit'] or meta['long']):
             return
         text, logged = msg.content, False
         for k, v in self.regexes.items():
