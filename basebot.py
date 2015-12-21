@@ -2156,11 +2156,6 @@ class BotManager(object):
             value = getattr(options, name)
             if value is not None:
                 config[name] = value
-        if 'botname' not in config and 'botcls' in config:
-            try:
-                config['botname'] = config['botcls'].BOTNAME
-            except AttributeError:
-                pass
         return (arguments, config)
 
     @classmethod
@@ -2193,7 +2188,8 @@ class BotManager(object):
         "Initializer. See class docstring for invocation details."
         self.botcls = config.get('botcls', None)
         self.botcfg = config.get('botcfg', config)
-        self.botname = config.get('botname', '<Bot>')
+        self.botname = config.get('botname',
+                                  getattr(self.botcls, 'BOTNAME', '<Bot>'))
         self.bots = config.get('bots', [])
         self.respawn_crashed = config.get('respawn_crashed', False)
         self.respawn_delay = config.get('respawn_delay', 60.0)
