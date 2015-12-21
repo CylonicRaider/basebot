@@ -430,7 +430,7 @@ class Message(Record):
         with self.__lock:
             if self.__mention_set is None:
                 self.__mention_set = frozenset(i[1:]
-                    for i in self.__mention_list)
+                    for i in self.mention_list)
             return self.__mention_set
 
 class SessionView(Record):
