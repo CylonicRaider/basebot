@@ -11,8 +11,8 @@ format_datetime(): Format a UNIX timestamp nicely.
 format_delta()   : Format a timestamp difference nicely.
 
 Packet           : An Euphorian packet.
-Message          : Representing a single message.
-SessionView      : Representing a single session.
+Message          : A single message.
+SessionView      : A single session.
 
 HeimEndpoint     : A bare-bones implementation of the API; useful for
                    minimalistic clients, or alternative expansion.
