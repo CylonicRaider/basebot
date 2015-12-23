@@ -62,6 +62,12 @@ URL_TEMPLATE = os.environ.get('BASEBOT_URL_TEMPLATE',
 # Utilities
 # ---------------------------------------------------------------------------
 
+# Py2/3K compatibility.
+try:
+    unichr = unichr
+except NameError:
+    unichr = chr
+
 def normalize_nick(nick):
     """
     normalize_nick(nick) -> str
