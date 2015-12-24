@@ -327,7 +327,7 @@ class JSONWebSocket:
 # ---------------------------------------------------------------------------
 
 # Constructed after github.com/euphoria-io/heim/blob/master/doc/api.md as of
-# commit 03906c0594c6c7ab5e15d1d8aa5643c847434c97.
+# commit 4f092a2b9be6001d3851be1cd769c2d08ee2cea4.
 
 class Packet(Record):
     """
@@ -359,7 +359,9 @@ class AccountView(Record):
     """
     _exports_ = ('id', 'name')
 
-# Documented by word-of-mouth.
+# Documented by word-of-mouth;
+# godoc.org/euphoria.io/heim/proto#PersonalAccountView (retrieved
+# 2015-12-24).
 class PersonalAccountView(AccountView):
     """
     PersonalAccountView is an AccountView with an additional Email field.
@@ -444,15 +446,20 @@ class SessionView(Record):
     SessionView describes a session and its identity.
 
     Attributes:
-    id        : the id of an agent or account
-    name      : the name-in-use at the time this view was captured
-    server_id : the id of the server that captured this view
-    server_era: the era of the server that captured this view
-    session_id: id of the session, unique across all sessions globally
-    is_staff  : if true, this session belongs to a member of staff (defaults
-                to False)
-    is_manager: if true, this session belongs to a manager of the room
-                (defaults to False)
+    id                 : the id of an agent or account
+    name               : the name-in-use at the time this view was captured
+    server_id          : the id of the server that captured this view
+    server_era         : the era of the server that captured this view
+    session_id         : id of the session, unique across all sessions
+                         globally
+    is_staff           : if true, this session belongs to a member of staff
+                         (defaults to False)
+    is_manager         : if true, this session belongs to a manager of the
+                         room (defaults to False)
+    client_address     : for hosts and staff, the virtual address of the
+                         client (defaults to None)
+    real_client_address: for staff, the real address of the client (defaults
+                         to None)
 
     Additional read-only properties:
     is_account: Whether this session has an account.
@@ -461,9 +468,11 @@ class SessionView(Record):
     norm_name : Normalized name.
     """
     _exports_ = ('id', 'name', 'server_id', 'server_era', 'session_id',
-                 'is_staff', 'is_manager')
+                 'is_staff', 'is_manager', 'client_address',
+                 'real_client_address')
 
-    _defaults_ = {'is_staff': False, 'is_manager': False}
+    _defaults_ = {'is_staff': False, 'is_manager': False,
+                  'client_address': None, 'real_client_address': None}
 
     @property
     def is_account(self):
