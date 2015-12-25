@@ -35,6 +35,7 @@ __version__ = "2.0"
 # Modules - Standard library
 import sys, os, re, time
 import collections, json
+import itertools
 import optparse
 import logging
 import threading
@@ -757,7 +758,8 @@ class HeimEndpoint(object):
     passcode    : Passcode for private rooms. Sent during (re-)connection.
                   Defaults to None; no passcode is sent in that case.
     retry_count : Amount of re-connection attempts until an operation (a
-                  connect or a send) fails. Defaults to 4.
+                  connect or a send) fails. May be None to indicate infinite
+                  re-tries. Defaults to 4.
     retry_delay : Amount of seconds to wait before a re-connection attempt.
                   Defaults to 10 seconds.
     timeout     : (Low-level) Connection timeout. Defaults to 60 seconds (as
@@ -882,7 +884,11 @@ class HeimEndpoint(object):
         with self.lock:
             count, delay = self.retry_count, self.retry_delay
         exc = None
-        for i in range(count + 1):
+        if count is None:
+            it = itertools.count()
+        else:
+            it = range(count + 1)
+        for i in it:
             if i: time.sleep(delay)
             try:
                 return func(i, count, exc)
