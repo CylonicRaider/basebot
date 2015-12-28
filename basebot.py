@@ -264,7 +264,8 @@ class Bot(object):
                 room_format = self.room_format
             url = room_format % self.roomname
             self.logger.info('Connecting to %s...' % url)
-            self.conn = websocket.create_connection(url)
+            # Timeout to prevent "hidden" connection losses.
+            self.conn = websocket.create_connection(url, 60)
             if self.rename_logger:
                 if self.nickname is None:
                     self.logger = logging.getLogger(self.roomname)
