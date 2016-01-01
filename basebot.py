@@ -743,51 +743,55 @@ class HeimEndpoint(object):
     incoming packets. Re-connects are handled transparently.
 
     Attributes (assignable by keyword arguments):
-    url_template: Template to construct URLs from. Its format() method
-                  will be called with the room name as the only argument.
-                  Defaults to the global URL_TEMPLATE variable, which, in
-                  turn, may be overridden by the environment variable
-                  BASEBOT_URL_TEMPLATE (if set when the module is
-                  initialized).
-    roomname    : Name of room to connect to. Defaults to None. Must be
-                  explicitly set for the connection to succeed.
-    nickname    : Nick-name to set on connection. Updated when a nick-reply
-                  is received. If None, no nick-name is set. Defaults to
-                  the value of the NICKNAME class attribute (which, in turn,
-                  defaults to None).
-    passcode    : Passcode for private rooms. Sent during (re-)connection.
-                  Defaults to None; no passcode is sent in that case.
-    retry_count : Amount of re-connection attempts until an operation (a
-                  connect or a send) fails. May be None to indicate infinite
-                  re-tries. Defaults to 4.
-    retry_delay : Amount of seconds to wait before a re-connection attempt.
-                  Defaults to 10 seconds.
-    timeout     : (Low-level) Connection timeout. Defaults to 60 seconds (as
-                  the Heim server sends pings every 30 seconds, the
-                  connection is either dead after that time, or generally
-                  unstable).
-    handlers    : Packet-type-to-list-of-callables mapping storing handlers
-                  for incoming packets.
-                  Handlers are called with the packet as the only argument;
-                  the packet's '_self' item is set to the HeimEndpoint
-                  instance that received the packet.
-                  Handlers for the (virtual) packet type None (i.e. the None
-                  singleton) are called for *any* packet, similarly to
-                  handle_early() (but *after* the built-in handlers).
-                  While commands and replies should be handled by the
-                  call-back mechanism, built-in handler methods (on_*();
-                  not in the mapping) are present for the asynchronous
-                  events.
-                  Event handlers are (indirectly) called from the input loop,
-                  and should therefore finish quickly, or offload the work
-                  to a separate thread. Mind that the Heim server will kick
-                  any clients unreponsive for too long times!
-                  While account-related event handlers are present, actual
-                  support for accounts is lacking, and has to be implemented
-                  manually.
-    logger      : logging.Logger instance to log to. Defaults to the root
-                  logger (at time of creation).
-    manager     : BotManager instance responsible for this HeimEndpoint.
+    url_template : Template to construct URLs from. Its format() method
+                   will be called with the room name as the only argument.
+                   Defaults to the global URL_TEMPLATE variable, which, in
+                   turn, may be overridden by the environment variable
+                   BASEBOT_URL_TEMPLATE (if set when the module is
+                   initialized).
+    roomname     : Name of room to connect to. Defaults to None. Must be
+                   explicitly set for the connection to succeed.
+    nickname     : Nick-name to set on connection. Updated when a nick-reply
+                   is received. If None, no nick-name is set. Defaults to
+                   the value of the NICKNAME class attribute (which, in turn,
+                   defaults to None).
+    passcode     : Passcode for private rooms. Sent during (re-)connection.
+                   Defaults to None; no passcode is sent in that case.
+    retry_count  : Amount of re-connection attempts until an operation (a
+                   connect or a send) fails. May be None to indicate infinite
+                   re-tries. Defaults to 4.
+    retry_delay  : Amount of seconds to wait before a re-connection attempt.
+                   Defaults to 10 seconds.
+    timeout      : (Low-level) Connection timeout. Defaults to 60 seconds (as
+                   the Heim server sends pings every 30 seconds, the
+                   connection is either dead after that time, or generally
+                   unstable).
+    do_respawn   : Re-start the main loop if an unexpected exception occurs.
+                   Defaults to False.
+    respawn_delay: Wait for this amount of seconds before re-spawning after a
+                   crash. Defaults to 60.
+    handlers     : Packet-type-to-list-of-callables mapping storing handlers
+                   for incoming packets.
+                   Handlers are called with the packet as the only argument;
+                   the packet's '_self' item is set to the HeimEndpoint
+                   instance that received the packet.
+                   Handlers for the (virtual) packet type None (i.e. the None
+                   singleton) are called for *any* packet, similarly to
+                   handle_early() (but *after* the built-in handlers).
+                   While commands and replies should be handled by the
+                   call-back mechanism, built-in handler methods (on_*();
+                   not in the mapping) are present for the asynchronous
+                   events.
+                   Event handlers are (indirectly) called from the input
+                   loop, and should therefore finish quickly, or offload the
+                   work to a separate thread. Mind that the Heim server will
+                   kick any clients unreponsive for too long times!
+                   While account-related event handlers are present, actual
+                   support for accounts is lacking, and has to be implemented
+                   manually.
+    logger       : logging.Logger instance to log to. Defaults to the root
+                   logger (at time of creation).
+    manager      : BotManager instance responsible for this HeimEndpoint.
 
     Access to the attributes should be serialized using the instance lock
     (available in the lock attribute). The __enter__ and __exit__ methods
@@ -826,6 +830,8 @@ class HeimEndpoint(object):
         self.retry_count = config.get('retry_count', 4)
         self.retry_delay = config.get('retry_delay', 10)
         self.timeout = config.get('timeout', 60)
+        self.do_respawn = config.get('do_respawn', False)
+        self.respawn_delay = config.get('respawn_delay', 60)
         self.handlers = config.get('handlers', {})
         self.logger = config.get('logger', logging.getLogger())
         self.manager = config.get('manager', None)
@@ -1566,16 +1572,27 @@ class HeimEndpoint(object):
         "Main" method. Connects to the configured room, runs an event loop,
         and closes whenever that aborts (normally or due to an exception).
         """
-        self.connect()
-        ok = True
-        try:
-            self.handle_loop()
-        except Exception:
-            ok = False
-            self.logger.error('Crashed!', exc_info=True)
-            raise
-        finally:
-            self._disconnect(ok, True)
+        while 1:
+            self.connect()
+            ok = True
+            try:
+                self.handle_loop()
+            except Exception:
+                ok = False
+                with self:
+                    respawn = self.do_respawn
+                    delay = self.respawn_delay
+                if respawn:
+                    self.logger.warning('Crashed! Will respawn...',
+                                        exc_info=True)
+                    time.sleep(delay)
+                    continue
+                else:
+                    self.logger.error('Crashed!', exc_info=True)
+                    raise
+            finally:
+                self._disconnect(ok, True)
+            break
 
 class LoggingEndpoint(HeimEndpoint):
     """
@@ -2116,10 +2133,6 @@ class BotManager(object):
     bots           : A list of bots to be used. The manager attribute of all
                      entries will be re-assigned to self. Defaults to an
                      empty list.
-    respawn_crashed: Re-spawn bots that crashed, if they were of the same
-                     class that botcls is. Defaults to False.
-    respawn_delay  : Wait for this amount of seconds before re-spawning a
-                     bot. Defaults to 60.
     logger         : Logger to use. Defaults to the root logger.
 
     Additional instance variables:
@@ -2141,6 +2154,21 @@ class BotManager(object):
         pass
 
     @classmethod
+    def create_parser(cls, config, kwds=None):
+        """
+        create_paarser(config, kwds=None) -> optparse.OptionParser
+
+        Create a new option parser.
+        config is ignored, kwds (if not None) is passed as keyword arguments
+        to the constructor.
+        Primarily present for hooking.
+        """
+        if kwds is None: kwds = {}
+        kwds.setdefault('description', 'Default values for the options are '
+                        'given in parentheses.')
+        return optparse.OptionParser(**kwds)
+
+    @classmethod
     def prepare_parser(cls, parser, config):
         """
         prepare_parser(parser, config) -> None
@@ -2148,18 +2176,41 @@ class BotManager(object):
         Add custom options to parser (an optparse.OptionParser) instance.
         config is the dictionary of the arguments specified to run_main().
         The default implementation adds the --url-template, --nickname,
-        --retry-count, --retry-delay, --loglevel, and --logfile options,
-        whereof the first four map to corresponding HeimEndpoint keyword
-        arguments, and the last two are used be BotManager.prepare_main().
+        --retry-count, --retry-delay, --respawn, --no-respawn,
+        --respawn-delay, --loglevel, and --logfile options, where the last
+        two are used by BotManager.prepare_main(), and the others are mapped
+        to corresponding keyword arguments.
         """
-        parser.add_option('--url-template', dest='url_template')
-        parser.add_option('--nickname', dest='nickname')
-        parser.add_option('--retry-count', type=int, dest='retry_count')
-        parser.add_option('--retry-delay', type=float, dest='retry_delay')
-        parser.add_option('--loglevel', dest='loglevel',
-                          default=config.get('loglevel', logging.INFO))
-        parser.add_option('--logfile', dest='logfile',
-                          default=config.get('logfile'))
+        parser.add_option('--url-template', dest='url_template',
+                          metavar='<url>',
+                          help='WebSocket URL template '
+                              '(default: wss://euphoria.io/room/{}/ws)')
+        parser.add_option('--nickname', dest='nickname', metavar='<nick>',
+                          help='Nick-name to use (none)')
+        parser.add_option('--retry-count', type=int, dest='retry_count',
+                          metavar='<int>',
+                          help='Amount of re-tries for connection '
+                              'operations (4, plus initial attempt)')
+        parser.add_option('--retry-delay', type=float, dest='retry_delay',
+                          metavar='<time>',
+                          help='Delay between connection operation '
+                              'attempts (10s)')
+        parser.add_option('--respawn', action='store_true',
+                          dest='do_respawn',
+                          help='Respawn crashed bots')
+        parser.add_option('--no-respawn', action='store_false',
+                          dest='do_respawn',
+                          help='Do not respawn crashed bots (default)')
+        parser.add_option('--respawn-delay', type=float,
+                          dest='respawn_delay', metavar='<time>',
+                          help='Delay between crashed bot respawns '
+                              '(10s)')
+        parser.add_option('--loglevel', dest='loglevel', metavar='<level>',
+                          default=config.get('loglevel', logging.INFO),
+                          help='Log level to use (INFO)')
+        parser.add_option('--logfile', dest='logfile', metavar='<file>',
+                          default=config.get('logfile'),
+                          help='File to log to (standard error)')
 
     @classmethod
     def prepare_main(cls, options, arguments, config):
@@ -2188,7 +2239,7 @@ class BotManager(object):
             '%(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=loglevel,
             **kwds)
         for name in ('url_template', 'nickname', 'retry_count',
-                     'retry_delay'):
+                     'retry_delay', 'do_respawn', 'respawn_delay'):
             value = getattr(options, name)
             if value is not None:
                 config[name] = value
@@ -2227,8 +2278,6 @@ class BotManager(object):
         self.botname = config.get('botname',
                                   getattr(self.botcls, 'BOTNAME', '<Bot>'))
         self.bots = config.get('bots', [])
-        self.respawn_crashed = config.get('respawn_crashed', False)
-        self.respawn_delay = config.get('respawn_delay', 60.0)
         self.logger = config.get('logger', logging.getLogger())
         self.lock = threading.RLock()
         self._shutting_down = False
@@ -2363,8 +2412,6 @@ class BotManager(object):
 
         Remove a bot and add a new bot atomically.
         See add_bot() and remove_bot() for semantics.
-        Used to prevent shutdowns due to all bots being respawned at the
-        same time.
         """
         with old.lock:
             old.manager = None
@@ -2384,40 +2431,14 @@ class BotManager(object):
 
         Invoked by bot when it closes; ok tells whether the close was
         "clean"; final tells whether the bot will try to re-connect itself
-        (final is true) or not (final is false). May respawn the bot if
-        self is configured accordingly, and (in particular) bot is an
-        instance of self.botcls.
+        (final is true) or not (final is false).
         """
-        def respawner():
-            time.sleep(timeout)
-            b.main()
         if not final:
             return
-        try:
-            with self.lock:
-                if not isinstance(bot, self.botcls):
-                    return
-                elif not self.respawn_crashed:
-                    return
-                timeout = self.respawn_delay
-            with bot.lock:
-                r = bot.roomname
-                p = bot.passcode
-                n = bot.nickname
-            if r is None:
-                return
-            try:
-                b = self.make_bot(r, p, n)
-            except TypeError:
-                return
-            self.swap_bots(bot, b)
-            bot = None
-            spawn_thread(respawner)
-        finally:
-            if bot:
-                self.remove_bot(bot)
-                with self._joincond:
-                    self._joincond.notifyAll()
+        if bot:
+            self.remove_bot(bot)
+            with self._joincond:
+                self._joincond.notifyAll()
 
     def main(self):
         """
@@ -2445,7 +2466,7 @@ def run_main(botcls=Ellipsis, **config):
         config['botcls'] = botcls
     mgrcls = config.get('mgrcls', BotManager)
     mgrcls.early_init(config)
-    parser = optparse.OptionParser()
+    parser = mgrcls.create_parser(config)
     mgrcls.prepare_parser(parser, config)
     options, arguments = parser.parse_args(config.get('argv', sys.argv[1:]))
     bots, cfg = mgrcls.prepare_main(options, arguments, config)
