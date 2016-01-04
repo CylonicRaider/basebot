@@ -10,6 +10,10 @@ parse_command()  : Split a string by whitespace and return a Token list.
 format_datetime(): Format a UNIX timestamp nicely.
 format_delta()   : Format a timestamp difference nicely.
 
+Token            : A string subclass with an offset attribute, telling where
+                   inside the supposed "original" string the string is
+                   located.
+
 Packet           : An Euphorian packet.
 Message          : A single message.
 SessionView      : A single session.
