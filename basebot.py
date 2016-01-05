@@ -2160,7 +2160,7 @@ class BotManager(object):
     @classmethod
     def create_parser(cls, config, kwds=None):
         """
-        create_paarser(config, kwds=None) -> optparse.OptionParser
+        create_parser(config, kwds=None) -> optparse.OptionParser
 
         Create a new option parser.
         config is ignored, kwds (if not None) is passed as keyword arguments
@@ -2217,20 +2217,15 @@ class BotManager(object):
                           help='File to log to (standard error)')
 
     @classmethod
-    def prepare_main(cls, options, arguments, config):
+    def interpret_args(cls, options, arguments, config):
         """
-        prepare_main(options, arguments, config) -> (bots, config)
+        interpret_args(options, arguments, config) -> (bots, config)
 
-        Perform final preparations for running; return parameters suitable
-        for from_config().
-        options and arguments are a optparse.Values object and a list of
-        remaining positional arguments, respectively; config is the
-        dictionary of arguments specified to run_main().
+        Actually perform running preparations for running, and generate
+        parameters from_config().
         The default implementation initializes the logging module according
-        to the given options in addition to preparing the return value,
-        arguments and config are passed through as it, after the options
-        noted in prepare_parser() as "mapped to corresponding HeimEndpoint
-        keyword arguments" that are not None are copied into config.
+        to the given options, and passed through arguments as bots and
+        config as config.
         """
         kwds = {'stream': sys.stderr}
         if options.logfile is not None:
@@ -2248,6 +2243,29 @@ class BotManager(object):
             if value is not None:
                 config[name] = value
         return (arguments, config)
+
+    @classmethod
+    def prepare_main(cls, config):
+        """
+        prepare_main(config) -> (bots, config)
+
+        Perform preparations for running; return parameters suitable for
+        from_config().
+        config is the dictionary of arguments specified to run_main();
+        config['argv'] should contain the command-line arguments minus
+        the program name.
+        The default implementation calls the following helper methods in
+        order:
+        - parser = create_parser(config)
+        - prepare_parser(parser, config)
+        - options, arguments = parser.parse_args(config.get('argv', []))
+        - return interpret_args(options, arguments, config)
+        """
+        parser = cls.create_parser(config)
+        cls.prepare_parser(parser, config)
+        options, arguments = parser.parse_args(config.get('argv',
+                                                          sys.argv[1:]))
+        return cls.interpret_args(options, arguments, config)
 
     @classmethod
     def from_config(cls, bots, config):
@@ -2468,12 +2486,10 @@ def run_main(botcls=Ellipsis, **config):
     """
     if botcls is not Ellipsis:
         config['botcls'] = botcls
+    config.setdefault('argv', sys.argv[1:])
     mgrcls = config.get('mgrcls', BotManager)
     mgrcls.early_init(config)
-    parser = mgrcls.create_parser(config)
-    mgrcls.prepare_parser(parser, config)
-    options, arguments = parser.parse_args(config.get('argv', sys.argv[1:]))
-    bots, cfg = mgrcls.prepare_main(options, arguments, config)
+    bots, cfg = mgrcls.prepare_main(config)
     inst = mgrcls.from_config(bots, cfg)
     try:
         inst.main()
