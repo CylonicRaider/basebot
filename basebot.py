@@ -2351,10 +2351,10 @@ class BotManager(object):
                 self._joincond.wait(10)
 
     def make_bot(self, roomname=Ellipsis, passcode=Ellipsis,
-                 nickname=Ellipsis, logger=Ellipsis):
+                 nickname=Ellipsis, logger=Ellipsis, **config):
         """
         make_bot(roomname=Ellipss, passcode=Ellipsis, nickname=Ellipsis,
-                 logger=Ellipsis) -> botcls instance
+                 logger=Ellipsis, **config) -> botcls instance
 
         Create a new Bot (or, HeimEndpoint) instance according to the
         internal configuration.
@@ -2362,10 +2362,10 @@ class BotManager(object):
         the room name and the nick-name of the bot is created; if it is
         None, the logger of self is inherited, otherwise, it is passed
         to the bot unchanged.
-        For configuration, self.botcfg is taken as a default, and a
-        dictionary made out of the non-Ellipsis arguments is merged with
-        that, overriding any values from botcfg; that is used as the
-        configuration for the new bot.
+        For configuration, self.botcfg is taken as a default, config is
+        applied "on top of" that, and a dictionary made out of the
+        non-Ellipsis arguments is merged with that, overriding any values
+        from botcfg; that is used as the configuration for the new bot.
         May raise a TypeError if self.botcls is None.
         """
         with self.lock:
@@ -2396,6 +2396,20 @@ class BotManager(object):
             else:
                 cfg['logger'] = logger
         return cls(**cfg)
+
+    def spawn_bot(self, roomname=Ellipsis, passcode=Ellipsis,
+                  nickname=Ellipsis, logger=Ellipsis, **config):
+        """
+        spawn_bot(roomname=Ellipsis, passcode=Ellipsis, nickname=Ellipsis,
+                  logger=Ellipsis, **config) -> botcls instance
+
+        Create a bot using the make_bot() method (see there for a description
+        of the parameters), add it to self, start it, and return it.
+        """
+        bot = self.make_bot(roomname, passcode, nickname, logger, config)
+        self.add_bot(bot)
+        spawn_thread(bot.main)
+        return bot
 
     def add_bot(self, bot):
         """
