@@ -1584,6 +1584,14 @@ class HeimEndpoint(object):
                 return self.send_packet('auth', type='passcode',
                                         passcode=self.passcode)
 
+    def start(self):
+        """
+        start() -> None
+
+        Start the main() method of this bot in a background thread.
+        """
+        spawn_thread(self.main)
+
     def main(self):
         """
         main() -> None
@@ -2139,20 +2147,24 @@ class BotManager(object):
     providing simple spawning and re-starting.
 
     config specifies configuration values:
-    botcls         : Bot class for creating new bots. It is assumed that
-                     instances can be constructed as with the HeimEndpoint
-                     class. Defaults to None, meaning no new bots can be
-                     created (from the BotManager instance).
-    botcfg         : Dictionary of configuration values to pass to
-                     newly-created bots. Defaults to the keyword argument
-                     dictionary itself, simplifying combined configuration.
-    botname        : A symbolic name of the bot. Defaults to '<Bot>', unless
-                     botcls is specified and has a BOTNAME attribute (whose
-                     value is used in that case).
-    bots           : A list of bots to be used. The manager attribute of all
-                     entries will be re-assigned to self. Defaults to an
-                     empty list.
-    logger         : Logger to use. Defaults to the root logger.
+    botcls  : Bot class for creating new bots. It is assumed that instances
+              can be constructed as with the HeimEndpoint class. Defaults
+              to None, meaning no new bots can be created (from the
+              BotManager instance).
+    botcfg  : Dictionary of configuration values to pass to newly-created
+              bots. Defaults to the keyword argument dictionary (of the
+              BotManager initializer) itself, simplifying combined
+              configuration.
+    botname : A symbolic name of the bot. Defaults to '<Bot>', unless botcls
+              is specified and has a BOTNAME attribute (whose value is used
+              in that case).
+    bots    : A list of bots to be used. The manager attribute of all entries
+              will be re-assigned to self. Defaults to an empty list.
+    parent  : The "parent" BotManager (or None if none).
+    children: The subordinate managers of this one. Certain method calls
+              (like, start() or join()) get propagated to them. Defaults to
+              an empty list.
+    logger  : Logger to use. Defaults to the root logger.
 
     Additional instance variables:
     lock: A threading.RLock instance used for serializing attribute access.
@@ -2315,6 +2327,7 @@ class BotManager(object):
         self.botname = config.get('botname',
                                   getattr(self.botcls, 'BOTNAME', '<Bot>'))
         self.bots = config.get('bots', [])
+        self.children = config.get('children', [])
         self.logger = config.get('logger', logging.getLogger())
         self.lock = threading.RLock()
         self._shutting_down = False
@@ -2322,6 +2335,9 @@ class BotManager(object):
         for b in self.bots:
             with b.lock:
                 b.manager = self
+        for c in self.children:
+            with c.lock:
+                c.parent = self
 
     def __enter__(self):
         return self.lock.__enter__()
@@ -2338,7 +2354,7 @@ class BotManager(object):
         self.logger.info('Starting %s...' % self.botname)
         with self.lock:
             for b in self.bots:
-                spawn_thread(b.main)
+                b.start()
 
     def shutdown(self):
         """
@@ -2349,8 +2365,11 @@ class BotManager(object):
         with self.lock:
             self._shutting_down = True
             l = list(self.bots)
+            c = list(self.children)
         for b in l:
             b.close()
+        for m in c:
+            m.shutdown()
         with self._joincond:
             self._joincond.notifyAll()
 
@@ -2364,6 +2383,9 @@ class BotManager(object):
             while self.bots:
                 # Remain responsive in Py2K.
                 self._joincond.wait(10)
+            c = list(self.children)
+        for m in c:
+            m.join()
 
     def make_bot(self, roomname=Ellipsis, passcode=Ellipsis,
                  nickname=Ellipsis, logger=Ellipsis, **config):
@@ -2423,7 +2445,7 @@ class BotManager(object):
         """
         bot = self.make_bot(roomname, passcode, nickname, logger, config)
         self.add_bot(bot)
-        spawn_thread(bot.main)
+        bot.start()
         return bot
 
     def add_bot(self, bot):
@@ -2475,6 +2497,36 @@ class BotManager(object):
                 self.bots.append(new)
         with new.lock:
             new.manager = self
+
+    def add_child(self, mgr):
+        """
+        add_child(mgr) -> None
+
+        Add mgr as a child to self.
+        Re-assigns mgr's parent attribute, even if mgr is already in
+        self.children.
+        """
+        with self.lock:
+            if mgr not in self.children:
+                self.children.append(mgr)
+        with mgr.lock:
+            mgr.parent = self
+
+    def remove_child(self, mgr):
+        """
+        remove_child(mgr) -> None
+
+        Remove mgr from the children of self.
+        Re-assigns mgr's parent attribute (if it is in self.children) to
+        None.
+        """
+        with self.lock:
+            try:
+                self.children.remove(mgr)
+            except ValueError:
+                return
+        with mgr.lock:
+            mgr.parent = None
 
     def handle_close(self, bot, ok, final):
         """
