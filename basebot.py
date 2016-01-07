@@ -1129,6 +1129,11 @@ class HeimEndpoint(object):
         After wrapping structures in the reply into the corresponding
         record classes, handle_early(), built-in handlers, generic type
         handlers, and call-backs are invoked (in that order).
+        Note that error packets are not handled in the normal way, but
+        are only subject of handle_early(), the special handle_error(),
+        type handlers for the type '_error', per-packet call-backs,
+        and handle_any(); the "normal" handlers for specific types are
+        not invoked.
         The '_self' item of the packet is set to the HeimEndpoint instance
         the packet is handled by, to aid external call-backs.
         """
@@ -1139,9 +1144,12 @@ class HeimEndpoint(object):
         with self.lock:
             # Global handler.
             self.handle_early(packet)
+            # Check if it's an error packet.
+            error = bool(packet.get('error'))
             # Built-in handlers
             p, t = packet, packet.get('type')
-            if   t == 'bounce-event'      : self.on_bounce_event(p)
+            if   error                    : self.handle_error(p)
+            elif t == 'bounce-event'      : self.on_bounce_event(p)
             elif t == 'disconnect-event'  : self.on_disconnect_event(p)
             elif t == 'edit-message-event': self.on_edit_message_event(p)
             elif t == 'hello-event'       : self.on_hello_event(p)
@@ -1155,12 +1163,16 @@ class HeimEndpoint(object):
             elif t == 'send-event'        : self.on_send_event(p)
             elif t == 'snapshot-event'    : self.on_snapshot_event(p)
             # Special built-in handler.
-            if t is not None and t.endswith('-reply'): self.handle_reply(p)
+            if t is not None and t.endswith('-reply'):
+                self.handle_reply(p)
             # Typeless handlers
             self._run_handlers(None, packet)
             # Type handlers
             tp = packet.get('type')
-            if tp: self._run_handlers(tp, packet)
+            if error:
+                self._run_handler('_error', packet)
+            elif tp:
+                self._run_handlers(tp, packet)
             # Call-backs
             cb = self.callbacks.pop(packet.get('id'), None)
             if callable(cb): cb(packet)
@@ -1187,8 +1199,10 @@ class HeimEndpoint(object):
             data = packet['data']
             data['log'] = [self._postprocess_message(m) for m in data['log']]
         elif tp == 'who-reply':
-            packet['data'] = [self._postprocess_sessionview(e)
-                              for e in packet['data']]
+            # Had to find out experimentally...
+            data = packet['data']
+            data['listing'] = [self._postprocess_sessionview(e)
+                               for e in data['listing']]
         elif tp == 'hello-event':
             data = packet['data']
             try:
@@ -1254,10 +1268,11 @@ class HeimEndpoint(object):
         handle().
         """
         if packet.type == 'nick-reply':
-            self.eff_nickname = packet.data['to']
-            if not self._nick_set:
-                self.handle_nick_set()
-                self._nick_set = True
+            if not packet.error:
+                self.eff_nickname = packet.data['to']
+                if not self._nick_set:
+                    self.handle_nick_set()
+                    self._nick_set = True
 
     def on_bounce_event(self, packet):
         """
