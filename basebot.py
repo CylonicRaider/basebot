@@ -1268,7 +1268,7 @@ class HeimEndpoint(object):
         handle().
         """
         if packet.type == 'nick-reply':
-            if not packet.error:
+            if not packet.get('error'):
                 self.eff_nickname = packet.data['to']
                 if not self._nick_set:
                     self.handle_nick_set()
