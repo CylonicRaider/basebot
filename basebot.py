@@ -793,6 +793,8 @@ class HeimEndpoint(object):
                    While account-related event handlers are present, actual
                    support for accounts is lacking, and has to be implemented
                    manually.
+    init_cb      : A function that is called in the very beginning of a bot's
+                   main loop with the bot instance as the only argument.
     logger       : logging.Logger instance to log to. Defaults to the root
                    logger (at time of creation).
     manager      : BotManager instance responsible for this HeimEndpoint.
@@ -837,6 +839,7 @@ class HeimEndpoint(object):
         self.do_respawn = config.get('do_respawn', False)
         self.respawn_delay = config.get('respawn_delay', 60)
         self.handlers = config.get('handlers', {})
+        self.init_cb = config.get('init_cb', None)
         self.logger = config.get('logger', logging.getLogger())
         self.manager = config.get('manager', None)
         self.cmdid = 0
@@ -1599,6 +1602,8 @@ class HeimEndpoint(object):
         "Main" method. Connects to the configured room, runs an event loop,
         and closes whenever that aborts (normally or due to an exception).
         """
+        if self.init_cb is not None:
+            self.init_cb()
         while 1:
             self.connect()
             ok = True
