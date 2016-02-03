@@ -1603,7 +1603,7 @@ class HeimEndpoint(object):
         and closes whenever that aborts (normally or due to an exception).
         """
         if self.init_cb is not None:
-            self.init_cb()
+            self.init_cb(self)
         while 1:
             self.connect()
             ok = True
