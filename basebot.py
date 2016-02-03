@@ -1753,6 +1753,8 @@ class LoggingEndpoint(HeimEndpoint):
                 message to be replied to.
         packet: The packet the message originated from.
         self  : The LoggingEndpoint instance this command is invoked from.
+        reply : A function that, called with a single argument, replies to
+                the message that caused this to be called.
         """
         pass
 
@@ -1869,7 +1871,8 @@ class BaseBot(LoggingEndpoint):
             self.logger.info('Got command: ' +
                              ' '.join(map(repr, map(str, parts))))
             meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
-                    'msgid': msg.id, 'packet': meta['packet']}
+                    'msgid': msg.id, 'packet': meta['packet'],
+                    'reply': lambda text: self.send_chat(text, msg.id)}
             self.handle_command(parts, meta)
             self._run_command_handlers(None, parts, meta)
             cmd = parts[0][1:]
