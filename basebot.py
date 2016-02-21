@@ -1748,7 +1748,7 @@ class LoggingEndpoint(HeimEndpoint):
         Invoke handle_chat() and all the handlers in chat_handlers with the
         given arguments.
         """
-        self.handle_chat(msg, meta)
+        self.handle_chat_ex(msg, meta)
         for h in self.chat_handlers:
             h(msg, meta)
 
