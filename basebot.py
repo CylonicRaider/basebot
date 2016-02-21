@@ -1897,7 +1897,8 @@ class BaseBot(LoggingEndpoint):
             self.logger.info('Got command: ' +
                              ' '.join(map(repr, map(str, parts))))
             meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
-                    'msgid': msg.id, 'packet': meta['packet']}
+                    'msgid': msg.id, 'packet': meta['packet'],
+                    'reply': lambda text: self.send_chat(text, msg.id)}
             self.handle_command(parts, meta)
             self._run_command_handlers(None, parts, meta)
             cmd = parts[0][1:]
@@ -1931,6 +1932,8 @@ class BaseBot(LoggingEndpoint):
                   LoggingEndpoint.
         packet  : The Packet the message comes from.
         msgid   : The ID of message.
+        reply   : A function that, taking a single string argument, sends a
+                  reply to the message that caused this command.
         """
         pass
 
