@@ -3,8 +3,8 @@
 Simplicistic library for [euphoria.io](http://euphoria.io/) bots;
 with examples.
 
-*The library is in public beta now! Please report any bugs or issues
-you can find!*
+*The library is a public release candidate now! Please still report any
+bugs or issues you can find!*
 
 The actual library consists only of the `basebot.py` file (it depends
 on [`websocket-client`](http://pypi.python.org/pypi/websocket-client/),
