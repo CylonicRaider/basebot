@@ -862,6 +862,8 @@ class HeimEndpoint(object):
         self._connection = None
         # Whether someone is poking the connection.
         self._connecting = False
+        # Whether re-connects should not happen.
+        self._closing = False
         # Condition variable to serialize all on.
         self._conncond = threading.Condition(self.lock)
         # Whether the session was properly initiated.
@@ -899,7 +901,8 @@ class HeimEndpoint(object):
         exchook (if not None) is called immediately after an exception is
         caught, with the same arguments as func (and the exception object
         filled in); it may re-raise the exception to abort instantly. If
-        exchook is None, a warning message will be logged.
+        its return value is true, the timeout is skipped. If exchook is None,
+        a warning message will be logged.
         If the last attempt fails, the exception that indicated the
         failure is re-raised.
         If the function call succeeds, the return value of func is passed
@@ -912,16 +915,18 @@ class HeimEndpoint(object):
             it = itertools.count()
         else:
             it = range(count + 1)
+        wait = True
         for i in it:
-            if i: time.sleep(delay)
+            if i and wait: time.sleep(delay)
             try:
                 return func(i, count, exc)
             except Exception as e:
                 exc = e
                 if exchook is None:
                     self.logger.warning('Operation failed!', exc_info=True)
+                    wait = True
                 else:
-                    exchook(i, count, exc)
+                    wait = (not exchook(i, count, exc))
                 if i == count:
                     raise
                 continue
@@ -932,15 +937,29 @@ class HeimEndpoint(object):
 
         Same as _attempt(), but each repeated call of func is preceded to one
         of _reconnect(). Additional rather internal modifications are
-        applied.
+        applied, resulting in (hopefully) graceful handling of closes and
+        re-connects from other threads.
         """
         def callback(i, n, exc):
-            if i: self._reconnect()
+            if i and d['reconnect']: self._reconnect()
             return func(i, n, exc)
         def exchook(i, n, exc):
+            with self._conncond:
+                c = self.get_connection()
+                if d['conn'] is not c and c:
+                    self.logger.warning('Reconnect happened, retrying...')
+                    d['reconnect'] = False
+                    return True
+                d['reconnect'] = True
+                d['conn'] = c
+                if self._closing:
+                    self.logger.warning('Operation interrupted while '
+                        'closing; aborting...')
+                    raise WSCCException()
             if exc and i != n and not isinstance(exc, WSCCException):
                 self.logger.warning('Operation failed (%r); '
                     'will re-connect...' % exc)
+        d = {'conn': self.get_connection(), 'reconnect': True}
         return self._attempt(callback, exchook)
 
     def _connect(self):
@@ -985,6 +1004,8 @@ class HeimEndpoint(object):
         else:
             self.logger.info('Closing!')
         with self._conncond:
+            if final:
+                self._closing = True
             while self._connecting:
                 self._conncond.wait()
             if self._logged_in:
@@ -1000,24 +1021,31 @@ class HeimEndpoint(object):
 
     def _reconnect(self):
         """
-        _reconnect() -> None
+        _reconnect() -> bool
 
         Considering the current connection to be broken, discard it
         forcefully (unless another attempt to re-connect is already
         happening), and try to connect again (only once).
+        Returns whether a re-connection successfully happened; the opposite
+        case may occur without raising an exception is close() has been
+        called.
         """
         with self._conncond:
+            if self._closing:
+                return False
             if not self._connecting:
                 self._connection = None
             while self._connecting:
                 self._conncond.wait()
             if self._connection is not None:
-                return
+                return True
             if self._logged_in:
                 self.handle_logout(False, False)
                 self._logged_in = False
             self._nick_set = False
             self.handle_close(False, False)
+            if self.roomname is None:
+                raise NoRoomError('No room specified')
             self._connecting = True
             url = self.url_template.format(self.roomname)
             timeout = self.timeout
@@ -1031,6 +1059,7 @@ class HeimEndpoint(object):
                 if conn is not None:
                     self.handle_connect()
                 self._conncond.notifyAll()
+        return True
 
     def connect(self):
         """
@@ -1042,6 +1071,8 @@ class HeimEndpoint(object):
         websocket.WebSocketException if the connection attempt(s) fail.
         Re-connections are tried.
         """
+        with self._conncond:
+            self._closing = False
         self._connect()
 
     def close(self):
@@ -1062,8 +1093,8 @@ class HeimEndpoint(object):
         Raises a websocket.WebSocketException if the connection attempt
         fails.
         """
-        self.close()
-        self.connect()
+        self._disconnect(True, False)
+        self._connect()
 
     def get_connection(self):
         """
@@ -1224,6 +1255,7 @@ class HeimEndpoint(object):
                 data['account'] = self._postprocess_personalaccountview(
                     data['account'])
             except KeyError:
+                # Not present if no account.
                 pass
             data['session'] = self._postprocess_sessionview(data['session'])
         elif tp in ('join-event', 'part-event'):
@@ -1273,6 +1305,15 @@ class HeimEndpoint(object):
         Can be used as a catch-all handler; called by handle().
         """
         pass
+
+    def handle_error(self, packet):
+        """
+        handle_error(packet) -> None
+
+        Handle an error packet (of any type).
+        The default implementation prints a warning.
+        """
+        self.logger.warning('Error packet received: %r' % (packet,))
 
     def handle_reply(self, packet):
         """
@@ -1622,9 +1663,11 @@ class HeimEndpoint(object):
             ok = True
             try:
                 self.handle_loop()
+            except WSCCException:
+                break
             except Exception:
                 ok = False
-                with self:
+                with self.lock:
                     respawn = self.do_respawn
                     delay = self.respawn_delay
                 if respawn:
