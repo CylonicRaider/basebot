@@ -826,6 +826,7 @@ class HeimEndpoint(object):
                   reply callbacks. Invoked after generic handlers.
     eff_nickname: The nick-name as the server returned it. May differ from
                   the one sent (truncation etc.).
+    agent_id    : Own agent ID, or Nont if not connected.
     session_id  : Own session ID, or None if not connected.
     lock        : Attribute access lock. Must be acquired whenever an
                   attribute is changed, or when multiple accesses to an
@@ -854,6 +855,7 @@ class HeimEndpoint(object):
         self.cmdid = 0
         self.callbacks = {}
         self.eff_nickname = None
+        self.agent_id = None
         self.session_id = None
         self.lock = threading.RLock()
         # Actual connection.
@@ -1094,6 +1096,7 @@ class HeimEndpoint(object):
         If ok is true, messages may be sent.
         """
         self.eff_nickname = None
+        self.agent_id = None
         self.session_id = None
         if self.manager: self.manager.handle_close(self, ok, final)
 
@@ -1319,6 +1322,7 @@ class HeimEndpoint(object):
         """
         # Not mentioned in the API docs (last time I checked), but this
         # packet is the *very* first one the server sends.
+        self.agent_id = packet.data['session'].id
         self.session_id = packet.data['session'].session_id
 
     def on_join_event(self, packet):
@@ -2344,8 +2348,11 @@ class BotManager(object):
         regarded as either a "bare" room name, or a room name followed
         -- after a colon -- by a passcode, e.g., 'test' parses to ('test',),
         and 'top:secret' parses to ('top', 'secret').
+        If config contains an "mgrcls" item, an instance of it will be
+        created, otherwise, the class the method is invoked on is used
+        (this is to allow subclasses to call this method without hacks).
         """
-        mgr = cls(**config)
+        mgr = config.get('mgrcls', cls)(**config)
         for d in bots:
             if isinstance(d, str):
                 room, sep, passcode = d.partition(':')
