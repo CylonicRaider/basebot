@@ -2287,7 +2287,7 @@ class BotManager(object):
         Actually perform running preparations for running, and generate
         parameters from_config().
         The default implementation initializes the logging module according
-        to the given options, and passed through arguments as bots and
+        to the given options, and passes through arguments as bots and
         config as config.
         """
         kwds = {'stream': sys.stderr}
