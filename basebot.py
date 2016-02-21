@@ -2452,7 +2452,7 @@ class BotManager(object):
             if self.botcls is None:
                 raise TypeError('Bot class not specified')
             cls = self.botcls
-            cfg = dict(self.botcfg)
+            cfg = dict(self.botcfg, **config)
             if roomname is not Ellipsis: cfg['roomname'] = roomname
             if passcode is not Ellipsis: cfg['passcode'] = passcode
             if nickname is not Ellipsis: cfg['nickname'] = nickname
@@ -2486,7 +2486,7 @@ class BotManager(object):
         Create a bot using the make_bot() method (see there for a description
         of the parameters), add it to self, start it, and return it.
         """
-        bot = self.make_bot(roomname, passcode, nickname, logger, config)
+        bot = self.make_bot(roomname, passcode, nickname, logger, **config)
         self.add_bot(bot)
         bot.start()
         return bot
