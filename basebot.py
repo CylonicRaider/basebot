@@ -1699,6 +1699,8 @@ class LoggingEndpoint(HeimEndpoint):
     chat_handlers: List of handler functions to call when new chat messages
                    arrive. Invoked like handle_chat(); after all other
                    handlers.
+    log_sends    : Print a logging message for every message sent (not to be
+                   confused with the log_* attributes above).
 
     If log_users or log_messages are changed during operation, the values in
     the corresponding list (see below) cannot be relied upon.
@@ -1715,6 +1717,7 @@ class LoggingEndpoint(HeimEndpoint):
         self.log_users = config.get('log_users', False)
         self.log_messages = config.get('log_messages', False)
         self.chat_handlers = config.get('chat_handlers', [])
+        self.log_sends = config.get('log_sends', True)
         self.users = UserList()
         self.messages = MessageTree()
 
@@ -1857,7 +1860,8 @@ class LoggingEndpoint(HeimEndpoint):
         A call-back may be specified by using the _callback keyword
         argument.
         """
-        self.logger.info('Sending message: %r' % (content,))
+        if self.log_sends:
+            self.logger.info('Sending message: %r' % (content,))
         return self.send_packet('send', content=content, parent=parent,
                                 **meta)
 
@@ -1923,12 +1927,15 @@ class BaseBot(LoggingEndpoint):
                       callables for the command. Called as handle_command(),
                       see there. Handlers for the None command (similarly to
                       packet handlers for None) are called for any command.
+    log_commands    : Print a logging message about every command received.
+                      Defaults to True.
     """
 
     def __init__(self, roomname=None, **config):
         "Initializer. See class docstring for details."
         LoggingEndpoint.__init__(self, roomname=roomname, **config)
         self.command_handlers = config.get('command_handlers', {})
+        self.log_commands = config.get('log_commands', True)
 
     def _run_chat_handlers(self, msg, meta):
         """
@@ -1941,8 +1948,9 @@ class BaseBot(LoggingEndpoint):
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
         if msg.content.startswith('!') and meta['live']:
             parts = parse_command(msg.content)
-            self.logger.info('Got command: ' +
-                             ' '.join(map(repr, map(str, parts))))
+            if self.log_commands:
+                self.logger.info('Got command: ' +
+                                ' '.join(map(repr, map(str, parts))))
             meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
                     'msgid': msg.id, 'packet': meta['packet'],
                     'reply': lambda text: self.send_chat(text, msg.id)}
