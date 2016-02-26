@@ -1216,7 +1216,7 @@ class HeimEndpoint(object):
             # Type handlers
             tp = packet.get('type')
             if error:
-                self._run_handler('_error', packet)
+                self._run_handlers('_error', packet)
             elif tp:
                 self._run_handlers(tp, packet)
             # Call-backs
