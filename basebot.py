@@ -1240,7 +1240,11 @@ class HeimEndpoint(object):
         tp = packet['type']
         if tp in ('get-message-reply', 'send-reply', 'edit-message-reply',
                   'edit-message-event', 'send-event'):
-            packet['data'] = self._postprocess_message(packet['data'])
+            try:
+                packet['data'] = self._postprocess_message(packet['data'])
+            except TypeError:
+                # data is sometimes None
+                pass
         elif tp == 'log-reply':
             data = packet['data']
             data['log'] = [self._postprocess_message(m) for m in data['log']]
