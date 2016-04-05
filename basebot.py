@@ -2673,7 +2673,7 @@ def run_main(botcls=Ellipsis, **config):
     inst = mgrcls.from_config(bots, cfg)
     try:
         inst.main()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         inst.shutdown()
         inst.join()
 
