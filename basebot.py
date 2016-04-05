@@ -1973,7 +1973,7 @@ class BaseBot(LoggingEndpoint):
         cmdline.
         """
         for h in self.command_handlers.get(cmd, ()):
-            h(msg, meta)
+            h(cmdline, meta)
 
     def handle_command(self, cmdline, meta):
         """
