@@ -2140,7 +2140,7 @@ class Bot(BaseBot):
 
 class MiniBot(Bot):
     """
-    MiniBot(roomname=None, **config) -> new instance
+    MiniBot(roomname=None, regexes=None, **config) -> new instance
 
     A Bot that provides convenience features for quick development.
 
@@ -2183,10 +2183,11 @@ class MiniBot(Bot):
        if it is a sequence of strings, each element is replied with.
     """
 
-    def __init__(self, roomname=None, **config):
+    def __init__(self, roomname=None, regexes=None, **config):
         "Initializer. See class docstring for details."
+        if regexes is None: regexes = {}
         Bot.__init__(self, roomname, **config)
-        self.regexes = config.get('regexes', {})
+        self.regexes = config.get('regexes', regexes)
         self.match_self = config.get('match_self', False)
         self.match_all = config.get('match_all', False)
         self._orig_regexes = self.regexes
