@@ -2673,9 +2673,13 @@ def run_main(botcls=Ellipsis, **config):
     inst = mgrcls.from_config(bots, cfg)
     try:
         inst.main()
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt:
         inst.shutdown()
         inst.join()
+    except SystemExit:
+        inst.shutdown()
+        inst.join()
+        raise
 
 def run_minibot(**config):
     """
