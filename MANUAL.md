@@ -35,12 +35,11 @@ library, including launching an example bot.
 ## Testing / example bot
 
 The best way to test whether the installation has succeeded is to run a bot.
-For example, save the following source snippet (an expanded version of the
-example bot in the `basebot.py` module documentation) into a file named
-`testbot.py` in your source location (either the directory where
-`basebot.py` lies, or anywhere if it is in the standard module path), and
-start the bot from the command line by running `python testbot.py test` in
-the corresponding directory. The bot should appear in the room
+For example, save the following source snippet into a file named `testbot.py`
+in your source location (either the directory where `basebot.py` lies, or
+anywhere if the latter is in the standard module path), and start the bot
+from the command line by running `python testbot.py test` in the
+corresponding directory. The bot should appear in the room
 [*&test*](http://euphoria.io/room/test) under the nickname *test*.
 
 ```python
@@ -69,7 +68,7 @@ if __name__ == '__main__':
         short_help='This is a test bot. For a bit more behavior, try '
             'posting a message with a single "test" at the beginning.',
         regexes={'^test$': 'Test!', '^test (.+)$': frobnicator,
-                 '^!calc\s+(\d+)\s+([-+*/])\s+(\d+)$': calculator})
+                 '^!calc\s+(\d+)\s*([-+*/])\s*(\d+)$': calculator})
 ```
 
 ## Further/advanced notes
