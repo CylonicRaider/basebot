@@ -84,10 +84,10 @@ or use your favorite documentation generator.
 
 The bot library has the domain name [euphoria.io](http://euphoria.io)
 built-in as a default. If you want to run a bot at an alternative site,
-you can achieve that by setting the `BASEBOT_ROOM_FORMAT` environment
-variable. It will be `%`-interpolated by the bot library with the room name
-to enter, and the library will try to connect to the resulting URL.
+you can achieve that by setting the `BASEBOT_URL_TEMPLATE` environment
+variable. It is `{}`-formatted by the bot library with the room name to
+enter, and the library tries to connect to the resulting URL.
 
-The default preset is `wss://euphoria.io/room/%s/ws`, therefore,
-trying to enter the room `test` using the default settings would result
-in an connection attempt to `wss://euphoria.io/room/test/ws`.
+The default preset is `wss://euphoria.io/room/{}/ws`, therefore, trying
+to enter the room `test` using the default settings would result in a
+connection attempt to `wss://euphoria.io/room/test/ws`.
