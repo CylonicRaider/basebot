@@ -65,7 +65,7 @@ def calculator(match, info):
     return 'Result: ' + str(result)
 
 if __name__ == '__main__':
-    basebot.run_minibot(sys.argv[1:], botname='TestBot', nickname='test',
+    basebot.run_minibot(botname='TestBot', nickname='test',
         short_help='This is a test bot. For a bit more behavior, try '
             'posting a message with a single "test" at the beginning.',
         regexes={'^test$': 'Test!', '^test (.+)$': frobnicator,
