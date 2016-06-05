@@ -1,0 +1,3 @@
+[submodule ".websocket-server"]
+	path = .websocket-server
+	url = https://github.com/CylonicRaider/websocket-server.git/
