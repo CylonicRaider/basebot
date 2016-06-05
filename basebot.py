@@ -2129,14 +2129,14 @@ class Bot(BaseBot):
             elif nick_matches():
                 reply(self.long_help, self.short_help)
         elif cmdline[0] == '!uptime':
-            if (self.do_uptime and len(cmdline) == 1 or
-                    self.do_gen_uptime and nick_matches()):
+            if (self.do_gen_uptime and len(cmdline) == 1 or
+                    self.do_uptime and nick_matches()):
                 if self.started is None:
                     reply("/me Uptime information is N/A")
                 else:
                     reply('/me is up since %s (%s)' % (
                         format_datetime(self.started),
-                        format_timedelta(time.time() - self.started)))
+                        format_delta(time.time() - self.started)))
 
 class MiniBot(Bot):
     """
