@@ -51,9 +51,8 @@ import logging
 import threading
 
 # Modules - Additional. Must be installed.
-import websocket
-from websocket import WebSocketException as WSException, \
-    WebSocketConnectionClosedException as WSCCException
+import websocket_server.client as websocket
+from websocket_server.exceptions import WebSocketError, ConnectionClosedError
 
 # Regex for @-mentions
 # From github.com/euphoria-io/heim/blob/master/client/lib/stores/chat.js as
@@ -280,21 +279,25 @@ class JSONWebSocket:
         """
         _recv_raw() -> str
 
-        Receive a WebSocket frame, and return it unmodified.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
+        Receive a WebSocket message, and return its payload.
+        Raises a ConnectionClosedError (imported into basebot) if the
+        underlying connection is closed.
         """
         with self.rlock:
-            return self.ws.recv()
+            while 1:
+                message = self.ws.read_frame()
+                if message is None: raise ConnectionClosedError()
+                # TEXT frames only
+                if message.msgtype == 1: return message.content
 
     def recv(self):
         """
         recv() -> object
 
-        Receive a single WebSocket frame, decode it using JSON, and return
+        Receive a single WebSocket message, decode it using JSON, and return
         the resulting object.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
+        Raises a ConnectionClosedError (imported into basebot) if the
+        underlying connection is closed.
         """
         return json.loads(self._recv_raw())
 
@@ -303,19 +306,19 @@ class JSONWebSocket:
         _send_raw(data) -> None
 
         Send the given data without modification.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
+        Raises a ConnectionClosedError (imported into basebot) if the
+        underlying connection is closed.
         """
         with self.wlock:
-            self.ws.send(data)
+            self.ws.write_text_frame(data)
 
     def send(self, obj):
         """
         send(obj) -> None
 
         JSON-encode the given object, and send it.
-        Raises a websocket.WebSocketConnectionClosedException (aliased to
-        WSCCException in this module) if the underlying connection closed.
+        Raises a ConnectionClosedError (imported into basebot) if the
+        underlying connection is closed.
         """
         self._send_raw(json.dumps(obj))
 
@@ -885,7 +888,7 @@ class HeimEndpoint(object):
         Can be hooked by subclasses.
         """
         self.logger.info('Connecting to %s...' % url)
-        ret = JSONWebSocket(websocket.create_connection(url, timeout))
+        ret = JSONWebSocket(websocket.connect(url, timeout=timeout))
         self.logger.info('Connected.')
         return ret
 
@@ -955,8 +958,8 @@ class HeimEndpoint(object):
                 if self._closing:
                     self.logger.warning('Operation interrupted while '
                         'closing; aborting...')
-                    raise WSCCException()
-            if exc and i != n and not isinstance(exc, WSCCException):
+                    raise ConnectionClosedError()
+            if exc and i != n and not isinstance(exc, ConnectionClosedError):
                 self.logger.warning('Operation failed (%r); '
                     'will re-connect...' % exc)
         d = {'conn': self.get_connection(), 'reconnect': True}
@@ -1067,8 +1070,8 @@ class HeimEndpoint(object):
 
         Connect to the configured room.
         Return instantly if already connected.
-        Raises a NoRoomError is no room is specified, or a
-        websocket.WebSocketException if the connection attempt(s) fail.
+        Raises a NoRoomError is no room is specified, or a WebSocketError
+        (as imported into basebot) if the connection attempt(s) fail.
         Re-connections are tried.
         """
         with self._conncond:
@@ -1080,7 +1083,7 @@ class HeimEndpoint(object):
         close() -> None
 
         Close the current connection (if any).
-        Raises a websocket.WebSocketError is something unexpected happens.
+        Raises a WebSocketError is something unexpected happens.
         """
         self._disconnect(True, True)
 
@@ -1090,8 +1093,7 @@ class HeimEndpoint(object):
 
         Disrupt the current connection (if any) and estabilish a new one.
         Raises a NoRoomError if no room to connect to is specified.
-        Raises a websocket.WebSocketException if the connection attempt
-        fails.
+        Raises a WebSocketException if the connection attempt fails.
         """
         self._disconnect(True, False)
         self._connect()
@@ -1136,8 +1138,7 @@ class HeimEndpoint(object):
         recv_raw(retry=True) -> object
 
         Receive a single object from the server, and return it.
-        May raise a websocket.WebSocketException, or a NoConnectionError
-        if not connected.
+        May raise a WebSocketError, or a NoConnectionError if not connected.
         If retry is true, the operation will be re-tried (after
         re-connects) before failing entirely.
         """
@@ -1154,8 +1155,7 @@ class HeimEndpoint(object):
         send_raw(obj, retry=True) -> object
 
         Try to send a single object over the connection.
-        My raise a websocket.WebSocketException, or a NoConnectionError
-        if not connected.
+        My raise a WebSocketError, or a NoConnectionError if not connected.
         If retry is true, the operation will be re-tried (after
         re-connects) before failing entirely.
         """
@@ -1667,7 +1667,7 @@ class HeimEndpoint(object):
             ok = True
             try:
                 self.handle_loop()
-            except WSCCException:
+            except ConnectionClosedError:
                 break
             except Exception:
                 ok = False
