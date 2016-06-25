@@ -2101,7 +2101,7 @@ class Bot(BaseBot):
     !help[ @myname]  -> Reply with a help message.
     !uptime @myhname -> Reply with a message informing about this bot's
                         current uptime, of the kind:
-                        /me is up since <datetime> (<timediff>)
+                        /me has been up since <datetime> (<timediff>)
 
     Instance variables (settable via config):
     do_stdcommands: Whether the standard commands should be respected at all.
@@ -2206,7 +2206,7 @@ class Bot(BaseBot):
                 if self.started is None:
                     reply("/me Uptime information is N/A")
                 else:
-                    reply('/me is up since %s (%s)' % (
+                    reply('/me has been up since %s (%s)' % (
                         format_datetime(self.started),
                         format_delta(time.time() - self.started)))
 
