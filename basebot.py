@@ -2581,6 +2581,8 @@ class BotManager(object):
         """
         self.logger.info('Starting %s...' % self.botname)
         with self.lock:
+            for c in self.children:
+                c.start()
             for b in self.bots:
                 b.start()
 
