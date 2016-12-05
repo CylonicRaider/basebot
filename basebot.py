@@ -1735,28 +1735,37 @@ class HeimEndpoint(object):
         "Main" method. Connects to the configured room, runs an event loop,
         and closes whenever that aborts (normally or due to an exception).
         """
+        def maybe_crash():
+            with self.lock:
+                respawn = self.do_respawn
+                delay = self.respawn_delay
+            if respawn:
+                self.logger.warning('Crashed! Will respawn...',
+                                    exc_info=True)
+                time.sleep(delay)
+            else:
+                self.logger.error('Crashed!', exc_info=True)
+                raise
         if self.init_cb is not None:
             self.init_cb(self)
         while 1:
+            ok = True
             try:
-                ok = True
                 self.connect()
+            except ConnectionClosedError:
+                break
+            except Exception:
+                ok = False
+                maybe_crash()
+                continue
+            try:
                 self.handle_loop()
             except ConnectionClosedError:
                 break
             except Exception:
                 ok = False
-                with self.lock:
-                    respawn = self.do_respawn
-                    delay = self.respawn_delay
-                if respawn:
-                    self.logger.warning('Crashed! Will respawn...',
-                                        exc_info=True)
-                    time.sleep(delay)
-                    continue
-                else:
-                    self.logger.error('Crashed!', exc_info=True)
-                    raise
+                maybe_crash()
+                continue
             finally:
                 self._disconnect(ok, True)
             break
@@ -2785,6 +2794,7 @@ class BotManager(object):
         """
         self.start()
         self.join()
+        self.logger.info('Shutting down.')
 
 def run_main(botcls=Ellipsis, **config):
     """
