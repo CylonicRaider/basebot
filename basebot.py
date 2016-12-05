@@ -1043,6 +1043,10 @@ class HeimEndpoint(object):
 
         Internal back-end for connect(). Takes care of synchronization.
         """
+        def do_connect(c, a, e):
+            return self._make_connection(url, timeout)
+        def exchook(i, n, exc):
+            return self._closing
         with self._conncond:
             if self.roomname is None:
                 raise NoRoomError('No room specified')
@@ -1055,8 +1059,7 @@ class HeimEndpoint(object):
             timeout = self.timeout
         conn = None
         try:
-            conn = self._attempt(
-                lambda c, a, e: self._make_connection(url, timeout))
+            conn = self._attempt(do_connect, exchook)
         finally:
             with self._conncond:
                 self._connecting = False
@@ -1735,9 +1738,9 @@ class HeimEndpoint(object):
         if self.init_cb is not None:
             self.init_cb(self)
         while 1:
-            self.connect()
-            ok = True
             try:
+                ok = True
+                self.connect()
                 self.handle_loop()
             except ConnectionClosedError:
                 break
@@ -2612,7 +2615,7 @@ class BotManager(object):
         with self.lock:
             while self.bots:
                 # Remain responsive in Py2K.
-                self._joincond.wait(10)
+                self._joincond.wait(1)
             c = list(self.children)
         for m in c:
             m.join()
