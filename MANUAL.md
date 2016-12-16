@@ -8,7 +8,8 @@ library, including launching an example bot.
 ## Installation
 
 1. The presence of a working [Python](http://www.python.org/downloads)
-   installation is silently assumed.
+   installation is silently assumed, including — depending on your desired
+   way of installation — the `pip` tool with support for Git repositories.
 
 2. First of all, the dependency of the library,
    [`websocket-server`](http://github.com/CylonicRaider/websocket-server/)
