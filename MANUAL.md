@@ -19,7 +19,7 @@ Because the procedural approach builds upon the object-oriented, the latter
 is explained first; you can [skip to the procedural one](#minibot) if you are
 not interested.
 
-## Bot
+## `Bot`
 
 The main (and historically only) way to create new bots is to inherit from
 the `basebot.Bot` class. Subclasses may override some class attributes to
@@ -47,7 +47,7 @@ There is a plethora of handler methods subclasses can override; a few notable
 ones are listed here. In every case of overriding a method, the corresponding
 method of the parent class should be invoked, or undefined behavior occurs.
 
-### handle_chat — Live message processing
+### `handle_chat` — Live message processing
 
     handle_chat(msg : Message, meta : dict) -> None
 
@@ -66,18 +66,20 @@ messages.
     - `msg.content`: The content of the message.
 
 - `meta` is an ordinary dictionary holding miscellaneous meta-information
-  about the message; most notable are:
+  about the message; most notable is:
     - `reply`: A convenience function that, when called, posts a message
-      as a reply to the message currently being handled. As an additional
-      argument, a callback may be specified that is called with the server's
-      `send-reply` to "our" reply as an argument.
+      as a reply to the message currently being handled (the concrete ID for
+      each instance is stored in the closure and does not change when another
+      message is handled). As an additional argument, a callback may be
+      specified that is called with the server's `send-reply` to "our" reply
+      as an argument.
 
     Further members are omitted here; see the [reference](#further-reading)
     for a full listing.
 
 The return value of `handle_chat` is ignored.
 
-### handle_command — Command handling
+### `handle_command` — Command handling
 
     handle_command(cmdline : list, meta : dict) -> None
 
@@ -85,17 +87,17 @@ This handler is invoked when a "live" chat message (as elaborated above) is
 in addition a bot command, _i.e._, the first non-whitespace character is an
 exclamation mark `!`; the method is run after `handle_chat`.
 
-- `cmdline` is a list of `Token`-s, _i.e._ strings with an additional
+- `cmdline` is a list of `basebot.Token`-s, _i.e._ strings with an additional
   `offset` attribute unambiguously identifying the position in the "parent"
-  string (see below for how to reach it); the class does not implement
-  anything beyond; all operations return bare strings. According to the
-  [botrulez](https://github.com/jedevc/botrulez), the very first item of
-  `cmdline` is the command name (including the leading `!`); further items
+  string (see below for how to reach that; the `Token` class does not
+  implement anything beyond; all operations return bare strings). According
+  to the [botrulez](https://github.com/jedevc/botrulez), the very first item
+  of `cmdline` is the command name (including the leading `!`); further items
   are the arguments in their original order.
 
 - `meta` is again an ordinary dictionary holding references to some objects
   of interest. Particularly interesting may be:
-    - `line`: The entire unfiltered command line.
+    - `line`: The entire unfiltered command line as a string.
     - `msgid`: The ID of the message.
     - `sender`: The nickname of the author of the message.
     - `sender_id`: The (agent) ID of the sender.
@@ -126,24 +128,24 @@ The return value of `handle_command` is, again, ignored.
     final message. `final` tells whether the log-out is a temporary
     disconnect (`False`) or the bot shutting down terminally (`True`).
 
-### send_chat — Post a message
+### `send_chat` — Post a message
 
     send_chat(content : str, parent = None : str) -> int
 
 This method — which is *not* a handler (but may be overridden anyway) — posts
 a chat message. `content` is the text of the message, `parent` is either the
 ID of the parent of the tentative message, or `None` for starting a new
-thread. The function returns the sequece ID (`id` in [the packet
+thread. The function returns the sequence ID (`id` in [the packet
 descritpion](http://api.euphoria.io/#packets)) of the `send` submitted.
 
 As an additional keyword-only argument, `_callback` may be passed; it is a
 function that is invoked with the `send-reply` from the server to the
 message sent above as the only argument when the reply arrives.
 
-## MiniBot
+## `MiniBot`
 
-The other approach is procedural, and avoids the use of classes (on the
-concrete bot's side) altogether. Instead, (named) arguments are passed to
+The other bot writing approach `basebot` suppoers is procedural, and avoids
+the use of own classes altogether. Instead, (named) arguments are passed to
 the `basebot.run_minibot` function (or, alternatively, to the constructor of
 `basebot.MiniBot`, which inherits from `basebot.Bot`) for setting all
 configuration values pointed out above.
@@ -179,7 +181,7 @@ The following functionality is only present at `MiniBot`:
   described above under `regexes` is implemented; if true, *all* regular
   expressions are matched against the input in traversal order.
 
-If a particular ordering of regular expression triggers is desired, an
+If a particular ordering of regular expression triggers is desired, a
 `collections.OrderedDict` instance may be passed as `regexes`; the warning
 about undefined order becomes void in that case.
 
@@ -190,7 +192,7 @@ corresponding to it has matched:
 
 1. If the object is callable, it is called as follows:
 
-        handler(match : Match, meta : dict) -> object
+        handler(match : re.match, meta : dict) -> object
 
     The first argument is the match object gained from matching the
     corresponding regular expression against the message; the second one
@@ -254,16 +256,16 @@ facilities such as logging) with two module-level functions:
   the bot defined by the given class in the rooms specified on the command
   line.
 
-- `basebot.run_minibot` takes no positional arguments at all, and takes
-  keyword arguments only. It is identical from `run_bot`, except that it
-  substitutes `MiniBot` as the bot class (if none is given explicitly).
-  See [above](#minibot) for some arguments of note.
+- `basebot.run_minibot` takes no positional arguments at all, but keyword
+  arguments only. It is identical from `run_bot`, except that it substitutes
+  `MiniBot` as the bot class (if none is given explicitly). See
+  [above](#minibot) for some arguments of note.
 
 ## Advanced
 
 This section covers topics not immediately needed for writing a basic bot.
 
-### BotManager
+### `BotManager`
 
 The `basebot.BotManager` class is responsible for parsing the command line,
 creating bot instances, in potentially multiple rooms, and overseeing their
@@ -278,12 +280,12 @@ for the principial actions. Of note are the following:
   *Option parser initialization*
 
     This method declares command-line options; refer to the [Python
-    documentation](https://docs.python.org/library/optparse.html)] for
+    documentation](https://docs.python.org/library/optparse.html) for
     details (see in particular the `add_option` method). `config` is the
     dictionary of keyword arguments as passed to `run_bot` or `run_minibot`.
 
 - `interpret_args(options : object, arguments : list, config : dict) ->
-  (list, dict)` — *Argument processing*
+  (bots : list, config : dict)` — *Argument processing*
 
     This method receives the option namespace, the argument list, and the
     `config` object mentioned above as arguments and returns a list of
@@ -297,8 +299,8 @@ The constructor of a subclass should pass all positional and keyword
 arguments on to the parent class constructor and perform initialization as
 necessary.
 
-Individual bot instance can access the `BotManager` that created them via
-the `manager` attribute, and other bot instance via it (although there is
+Individual bot instances can access the `BotManager` that created them via
+the `manager` attribute, and other bot instances via it (although there is
 no standard way for that).
 
 See also the subsection about thread safety just below.
@@ -315,7 +317,8 @@ inter-bot interaction in a threadsafe way.
 
 `basebot` provides convenience functions for spawning daemonic and
 non-daemonic worker threads at module level; be careful not to spawn them
-in methods that may be run multiple times over the lifetime of a bot.
+in methods that may be run multiple times over the lifetime of a bot
+(unless that is intended).
 
 ## Further reading
 
