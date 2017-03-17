@@ -2294,8 +2294,9 @@ class MiniBot(Bot):
         if not hasattr(self.regexes, 'keys'):
             self.regexes = collections.OrderedDict(self.regexes)
 
-    def handle_chat(self, msg, meta):
-        "See Bot.handle_chat() for details."
+    def handle_chat_ex(self, msg, meta):
+        "See Bot.handle_chat_ex() for details."
+        basebot.Bot.handle_chat_ex(self, msg, meta)
         if (not self.match_self and meta['own'] or
                 meta['edit'] or meta['long']):
             return
