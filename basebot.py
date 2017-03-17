@@ -2044,9 +2044,10 @@ class BaseBot(LoggingEndpoint):
                 self.logger.info('Got command: ' +
                                 ' '.join(map(repr, map(str, parts))))
             meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
-                    'msgid': msg.id, 'packet': meta['packet'],
-                    'reply': lambda text, cb=None: self.send_chat(text,
-                        msg.id, _callback=cb)}
+                'msgid': msg.id, 'sender': msg.sender.name,
+                'sender_id': msg.sender.id, 'packet': meta['packet'],
+                'reply': lambda text, cb=None: self.send_chat(text, msg.id,
+                                                              _callback=cb)}
             self.handle_command(parts, meta)
             self._run_command_handlers(None, parts, meta)
             cmd = parts[0][1:]
@@ -2073,17 +2074,19 @@ class BaseBot(LoggingEndpoint):
         handlers can be registered for, the very first token includes
         the leading exclamation mark); meta is a dictionary holding
         meta-data:
-        line    : The complete command line (the content of the Message the
-                  command it in).
-        msg     : The Message the command stems from.
-        msg_meta: Meta-data about msg, as described in handle_chat() in
-                  LoggingEndpoint.
-        packet  : The Packet the message comes from.
-        msgid   : The ID of message.
-        reply   : A function that, taking a single string argument, sends a
-                  reply to the message that caused this command. A callback
-                  to handle the server's reply to *that* may be passed as
-                  another argument.
+        line     : The complete command line (the content of the Message the
+                   command it in).
+        msg      : The Message the command stems from.
+        msg_meta : Meta-data about msg, as described in handle_chat() in
+                   LoggingEndpoint.
+        packet   : The Packet the message comes from.
+        msgid    : The ID of message.
+        sender   : The nick-name of the user who sent the message.
+        sender_id: The (agent) ID of the sender.
+        reply    : A function that, taking a single string argument, sends a
+                   reply to the message that caused this command. A callback
+                   to handle the server's reply to *that* may be passed as
+                   another argument.
         """
         pass
 
@@ -2252,17 +2255,19 @@ class MiniBot(Bot):
     1. If the object is callable, step 4 will consider the result of the
        object's call on the match object as the first argument, and a
        dictionary with additional meta-data as a second argument:
-       self    : The MiniBot instance that started the call.
-       msg     : The Message the text matched came from.
-       msg_meta: Meta-data about msg, as described in handle_chat() in
-                 LoggingEndpoint.
-       msgid   : The ID of msg.
-       packet  : The packet the message was from.
-       reply   : A function that, taking a single string as an argument,
-                 sends a reply to the message that caused this call-back,
-                 with the given string as the contents. A nested callback may
-                 be specified as a second argument, which is then called with
-                 the server's send-reply as the argument.
+       self     : The MiniBot instance that started the call.
+       msg      : The Message the text matched came from.
+       msg_meta : Meta-data about msg, as described in handle_chat() in
+                  LoggingEndpoint.
+       msgid    : The ID of msg.
+       sender   : The name of the user who sent the message.
+       sender_id: The (agent) ID of the user who sent it.
+       packet   : The packet the message was from.
+       reply    : A function that, taking a single string as an argument,
+                  sends a reply to the message that caused this call-back,
+                  with the given string as the contents. A nested callback
+                  may be specified as a second argument, which is then called
+                  with the server's send-reply as the argument.
        (Steps 2 and 3 are skipped in this case.)
     2. If the object is not callable, but a tuple or list of strings, step 3
        is performed on each element of it (in order), otherwise, on the
@@ -2315,6 +2320,7 @@ class MiniBot(Bot):
                                                          _callback=cb)
             value = value(match, {'self': self, 'msg': msg,
                 'msg_meta': meta, 'msgid': msg.id,
+                'sender': msg.sender.name, 'sender_id': msg.sender.id,
                 'packet': meta['packet'], 'reply': reply})
             expand = False
         else:
