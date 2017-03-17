@@ -1,4 +1,4 @@
-# basebot programmer's manual
+# `basebot` Programmer's Manual
 
 ## Abstract
 
@@ -7,19 +7,21 @@ using `basebot`.
 
 ## Introduction
 
-`basebot` supports two approaches to writing bots, a [procedural](#minibot)
-and an [object-oriented](#bot) one. Both are equivalently powerful; however,
-although simple bots are written quickly using the procedural approach,
-implementing more complex functionality in it can become ugly as quickly.
+`basebot` supports two approaches to writing bots, a
+[procedural](#procedural-approach) and an
+[object-oriented](#object-oriented-approach) one. Both are equivalently
+powerful; however, although simple bots are written quickly using the
+procedural approach, implementing more complex functionality in it can become
+ugly as quickly.
 
 For actually running a bot (be it in production or testing), see the
-[corresponding section](#running).
+[corresponding section](#running-bots).
 
 Because the procedural approach builds upon the object-oriented, the latter
-is explained first; you can [skip to the procedural one](#minibot) if you are
-not interested.
+is explained first; you can [skip to the procedural one](#procedural-approach)
+if you are not interested.
 
-## `Bot`
+## Object-oriented approach
 
 The main (and historically only) way to create new bots is to inherit from
 the `basebot.Bot` class. Subclasses may override some class attributes to
@@ -142,7 +144,7 @@ As an additional keyword-only argument, `_callback` may be passed; it is a
 function that is invoked with the `send-reply` from the server to the
 message sent above as the only argument when the reply arrives.
 
-## `MiniBot`
+## Procedural approach
 
 The other bot writing approach `basebot` suppoers is procedural, and avoids
 the use of own classes altogether. Instead, (named) arguments are passed to
@@ -246,7 +248,7 @@ bot to handle state initialization / cleanup:
 - `close_cb` is similarly invoked at the very end of the bot's main loop
   with it as the only argument.
 
-## Running
+## Running bots
 
 `basebot` provides automated means of setting up a bot (along with other
 facilities such as logging) with two module-level functions:
@@ -259,13 +261,13 @@ facilities such as logging) with two module-level functions:
 - `basebot.run_minibot` takes no positional arguments at all, but keyword
   arguments only. It is identical from `run_bot`, except that it substitutes
   `MiniBot` as the bot class (if none is given explicitly). See
-  [above](#minibot) for some arguments of note.
+  [above](#procedural-approach) for some arguments of note.
 
 ## Advanced
 
 This section covers topics not immediately needed for writing a basic bot.
 
-### `BotManager`
+### Bot managers
 
 The `basebot.BotManager` class is responsible for parsing the command line,
 creating bot instances, in potentially multiple rooms, and overseeing their
