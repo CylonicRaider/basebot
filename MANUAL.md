@@ -12,6 +12,9 @@ and an [object-oriented](#bot) one. Both are equivalently powerful; however,
 although simple bots are written quickly using the procedural approach,
 implementing more complex functionality in it can become ugly as quickly.
 
+For actually running a bot (be it in production or testing), see the
+[corresponding section](#running).
+
 Because the procedural approach builds upon the object-oriented, the latter
 is explained first; you can [skip to the procedural one](#minibot) if you are
 not interested.
@@ -240,6 +243,79 @@ bot to handle state initialization / cleanup:
   run.
 - `close_cb` is similarly invoked at the very end of the bot's main loop
   with it as the only argument.
+
+## Running
+
+`basebot` provides automated means of setting up a bot (along with other
+facilities such as logging) with two module-level functions:
+
+- `basebot.run_bot` is called with the bot class as the only positional
+  argument (and optional configuration via keyword arguments), and spawns
+  the bot defined by the given class in the rooms specified on the command
+  line.
+
+- `basebot.run_minibot` takes no positional arguments at all, and takes
+  keyword arguments only. It is identical from `run_bot`, except that it
+  substitutes `MiniBot` as the bot class (if none is given explicitly).
+  See [above](#minibot) for some arguments of note.
+
+## Advanced
+
+This section covers topics not immediately needed for writing a basic bot.
+
+### BotManager
+
+The `basebot.BotManager` class is responsible for parsing the command line,
+creating bot instances, in potentially multiple rooms, and overseeing their
+execution. Functionality available across room boundaries should be bound
+here.
+
+The manager class to use can be specified using the `mgrcls` keyword argument
+to `run_bot` or `run_minibot`; its (class) methods are invoked by the latters
+for the principial actions. Of note are the following:
+
+- `prepare_parser(parser : optparse.OptionParser, config : dict) -> None` —
+  *Option parser initialization*
+
+    This method declares command-line options; refer to the [Python
+    documentation](https://docs.python.org/library/optparse.html)] for
+    details (see in particular the `add_option` method). `config` is the
+    dictionary of keyword arguments as passed to `run_bot` or `run_minibot`.
+
+- `interpret_args(options : object, arguments : list, config : dict) ->
+  (list, dict)` — *Argument processing*
+
+    This method receives the option namespace, the argument list, and the
+    `config` object mentioned above as arguments and returns a list of
+    bot specifications and a keyword argument dictionary for the `BotManager`
+    constructor. Overriding classes are advised to invoke the parent class'
+    method and to amend the `config` returned by it with values from the
+    `options` object, transforming as necessary; these get passed down to
+    the `BotManager` constructor and to the bots' constructors.
+
+The constructor of a subclass should pass all positional and keyword
+arguments on to the parent class constructor and perform initialization as
+necessary.
+
+Individual bot instance can access the `BotManager` that created them via
+the `manager` attribute, and other bot instance via it (although there is
+no standard way for that).
+
+See also the subsection about thread safety just below.
+
+### Thread safety
+
+Each bot instance is run in an own thread; as long as there is only one or
+the bot instances do not interact with each other, no particular precautions
+do need to be taken.
+
+While the handler methods of bots are protected by the bot's state
+manipulation lock, arbitrary accesses from outside are not. Implement
+inter-bot interaction in a threadsafe way.
+
+`basebot` provides convenience functions for spawning daemonic and
+non-daemonic worker threads at module level; be careful not to spawn them
+in methods that may be run multiple times over the lifetime of a bot.
 
 ## Further reading
 
