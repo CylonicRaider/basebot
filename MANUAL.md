@@ -137,6 +137,96 @@ As an additional keyword-only argument, `_callback` may be passed; it is a
 function that is invoked with the `send-reply` from the server to the
 message sent above as the only argument when the reply arrives.
 
+## MiniBot
+
+The other approach is procedural, and avoids the use of classes (on the
+concrete bot's side) altogether. Instead, (named) arguments are passed to
+the `basebot.run_minibot` function (or, alternatively, to the constructor of
+`basebot.MiniBot`, which inherits from `basebot.Bot`) for setting all
+configuration values pointed out above.
+
+- `botname`: The name of the bot for logging; corresponds to the `BOTNAME`
+  class attribute.
+- `nickname`: The default nickname of the bot; corresponds to `NICKNAME`.
+- `short_help`: The reply for the general `!help` command; corresponds to
+  `SHORT_HELP`.
+- `long_help`: The reply for the specific `!help @BotName` command; if not
+  specified, `short_help` is used instead (if given). Corresponds to
+  `LONG_HELP`.
+
+The following argument may be used to implement the functionality of a bot
+(defined indeed by the `Bot` class):
+
+- `command_handlers`: A mapping from command names (*without* the leading
+  exclamation marks `!`) to (only) functions, which are invoked when the
+  command identified by the key is encountered; the signature of the
+  handler functions is the same as of `handle_command` above.
+
+The following functionality is only present at `MiniBot`:
+
+- `regexes`: A mapping from regular expression strings to [reply
+  specifications](#reply-specifications). The regular expressions are
+  matched against the beginning of the message in traversal order, _i.e._,
+  in general, **in undefined order**, and the value corresponding to the
+  first regular expression that matched is used.
+- `match_self`: If the argument is absent or false (the default), messages
+  from the bot itself are *not* interpreted by it to avoid infinite loops;
+  if true, they are.
+- `match_all`: If the argument is absent or false (the default), the behavior
+  described above under `regexes` is implemented; if true, *all* regular
+  expressions are matched against the input in traversal order.
+
+If a particular ordering of regular expression triggers is desired, an
+`collections.OrderedDict` instance may be passed as `regexes`; the warning
+about undefined order becomes void in that case.
+
+### Reply specifications
+
+The following steps are applied to an object when the regular expression
+corresponding to it has matched:
+
+1. If the object is callable, it is called as follows:
+
+        handler(match : Match, meta : dict) -> object
+
+    The first argument is the match object gained from matching the
+    corresponding regular expression against the message; the second one
+    is a dictionary containing meta-information that may be of interest
+    (the items described here are indeed identical to the ones mentioned
+    under `handle_command`):
+
+    - `msgid`: The ID of the message being processed.
+    - `sender`: The nickname of the sender of the message.
+    - `sender_id`: The (agent) ID of the sender of the message.
+    - `reply`: A function that, when called, posts a message as a reply to
+      the current message. As an additional argument, a callback may be
+      passed that is called with the server's `send-reply` to "our" reply as
+      the argument.
+
+    Additional members can be found in the [reference](#further-reading).
+
+    The return value of the function, or the object itself if it is not one,
+    is used in the next step.
+
+2. If the object is a list or tuple, all of its entries are considered by
+   the next step individually; if it is a string, only it itself is; if it
+   is `None`, the next step is not performed.
+
+3. Unless the original object (in the first step) had been a function, the
+   current string is passed through the match object's `expand` method (see
+   [the Python
+   documentation](https://docs.python.org/library/re.html#re.match.expand)),
+   and then replied with to the message being processed.
+
+Hence, the following patterns for handling a message can be highlighted:
+
+- A (mostly) fixed reply (or list thereof) is hard-coded and expanded with
+  groupings from the match.
+- A handler function (or lambda) processes the match and returns a string
+  (or list of strings) to reply with.
+- A handler function processes the match and returns nothing (but has side
+  effects, or stores the `reply` closure for later use).
+
 ## Further reading
 
 The inline documentation of [basebot.py](basebot.py) provides a thorough
