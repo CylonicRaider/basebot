@@ -2046,6 +2046,7 @@ class BaseBot(LoggingEndpoint):
             meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
                 'msgid': msg.id, 'sender': msg.sender.name,
                 'sender_id': msg.sender.id, 'packet': meta['packet'],
+                'self': self,
                 'reply': lambda text, cb=None: self.send_chat(text, msg.id,
                                                               _callback=cb)}
             self.handle_command(parts, meta)
@@ -2083,6 +2084,7 @@ class BaseBot(LoggingEndpoint):
         msgid    : The ID of message.
         sender   : The nick-name of the user who sent the message.
         sender_id: The (agent) ID of the sender.
+        self     : The BaseBot instance the method is invoked on.
         reply    : A function that, taking a single string argument, sends a
                    reply to the message that caused this command. A callback
                    to handle the server's reply to *that* may be passed as

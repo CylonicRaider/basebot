@@ -155,7 +155,7 @@ configuration values pointed out above.
   `LONG_HELP`.
 
 The following argument may be used to implement the functionality of a bot
-(defined indeed by the `Bot` class):
+(defined indeed by parents of the `Bot` class):
 
 - `command_handlers`: A mapping from command names (*without* the leading
   exclamation marks `!`) to (only) functions, which are invoked when the
@@ -226,6 +226,20 @@ Hence, the following patterns for handling a message can be highlighted:
   (or list of strings) to reply with.
 - A handler function processes the match and returns nothing (but has side
   effects, or stores the `reply` closure for later use).
+
+### Shared state
+
+Apart from storing state globally (which is frowned upon), the callbacks
+(in fact all the ones mentioned above which have a `meta` argument) can
+access the `MiniBot` (or `Bot`) instance used as the `meta['self']`
+member. In addition, the following callbacks may be specified for the
+bot to handle state initialization / cleanup:
+
+- `init_cb` is a function invoked once the bot connects for the first time.
+  It takes a single positional argument, namely the bot instance going to
+  run.
+- `close_cb` is similarly invoked at the very end of the bot's main loop
+  with it as the only argument.
 
 ## Further reading
 
