@@ -41,7 +41,8 @@ passed to the parent class' constructor to tune responses to standard
 commands; refer to the [reference](#further-reading) for details.
 
 There is a plethora of handler methods subclasses can override; a few notable
-ones are listed here:
+ones are listed here. In every case of overriding a method, the corresponding
+method of the parent class should be invoked, or undefined behavior occurs.
 
 ### handle_chat — Live message processing
 
@@ -98,6 +99,43 @@ exclamation mark `!`; the method is run after `handle_chat`.
     - `reply`, a convenience function for replying elaborated upon above.
 
 The return value of `handle_command` is, again, ignored.
+
+### Additional handlers
+
+- `handle_login() -> None` — *Initial actions*
+
+    This method is invoked after the bot has successfully authenticated in a
+    room, but has not set a nickname yet. The return value is ignored.
+
+- `handle_nick_set() -> None` — *Late initial actions*
+
+    This method is invoked after the bot has set its nick; it can be used to
+    post messages announcing the bot's appearance. The return value is
+    ignored again.
+
+- `handle_logout(ok : bool, final : bool) -> None` — *Early final actions*
+
+    This method is the inverse of `handle_login`; it is invoked just before
+    the bot disconnects. The return value is ignored.
+
+    `ok` tells whether the connection is being terminated normally (`True`)
+    or was severed abruptly (`False`); if it is true, the bot may post a
+    final message. `final` tells whether the log-out is a temporary
+    disconnect (`False`) or the bot shutting down terminally (`True`).
+
+### send_chat — Post a message
+
+    send_chat(content : str, parent = None : str) -> int
+
+This method — which is *not* a handler (but may be overridden anyway) — posts
+a chat message. `content` is the text of the message, `parent` is either the
+ID of the parent of the tentative message, or `None` for starting a new
+thread. The function returns the sequece ID (`id` in [the packet
+descritpion](http://api.euphoria.io/#packets)) of the `send` submitted.
+
+As an additional keyword-only argument, `_callback` may be passed; it is a
+function that is invoked with the `send-reply` from the server to the
+message sent above as the only argument when the reply arrives.
 
 ## Further reading
 
