@@ -14,6 +14,6 @@ are examples.
 For documentation, look at the docstrings with your favorite means
 (`pydoc basebot`, `python -c 'import basebot; help(basebot)'`,
 `cat basebot.py`, *etc.*). For a quick start guide, check out
-[MANUAL.md](MANUAL.md).
+[SETUP.md](SETUP.md).
 
 *Have fun!*
