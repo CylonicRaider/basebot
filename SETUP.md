@@ -76,6 +76,8 @@ if __name__ == '__main__':
 
 ### Further reading
 
+For a fuller introduction, see [MANUAL.md](MANUAL.md).
+
 The best source of documentation about the library (I know about) is [the
 library itself](basebot.py); read its inline docs for further information,
 or use your favorite documentation generator.
