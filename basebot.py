@@ -2040,9 +2040,6 @@ class BaseBot(LoggingEndpoint):
         LoggingEndpoint._run_chat_handlers(self, msg, meta)
         if msg.content.startswith('!') and meta['live']:
             parts = parse_command(msg.content)
-            if self.log_commands:
-                self.logger.info('Got command: ' +
-                                ' '.join(map(repr, map(str, parts))))
             meta = {'line': msg.content, 'msg': msg, 'msg_meta': meta,
                 'msgid': msg.id, 'sender': msg.sender.name,
                 'sender_id': msg.sender.id, 'packet': meta['packet'],
@@ -2054,6 +2051,16 @@ class BaseBot(LoggingEndpoint):
             cmd = parts[0][1:]
             if cmd: self._run_command_handlers(cmd, parts, meta)
 
+    def _log_command(self, cmdline):
+        """
+        _log_command(cmdline) -> None
+
+        Log a command that presumably caused some response.
+        """
+        if self.log_commands:
+            self.logger.info('Got command: ' +
+                             ' '.join(map(repr, map(str, cmdline))))
+
     def _run_command_handlers(self, cmd, cmdline, meta):
         """
         _run_command_handlers(cmd, cmdline, meta) -> None
@@ -2063,7 +2070,11 @@ class BaseBot(LoggingEndpoint):
         cmd must not necessarily represent the command encoded in
         cmdline.
         """
+        logged = False
         for h in self.command_handlers.get(cmd, ()):
+            if not logged:
+                self._log_command(cmdline)
+                logged = True
             h(cmdline, meta)
 
     def handle_command(self, cmdline, meta):
@@ -2294,18 +2305,27 @@ class MiniBot(Bot):
         if not hasattr(self.regexes, 'keys'):
             self.regexes = collections.OrderedDict(self.regexes)
 
+    def _log_trigger(self, msg):
+        """
+        _log_trigger(msg) -> None
+
+        Log a message presumably triggering a response via the regexes
+        mechanism.
+        """
+        self.logger.into('Trigger message: %r' % msg.content)
+
     def handle_chat_ex(self, msg, meta):
         "See Bot.handle_chat_ex() for details."
         Bot.handle_chat_ex(self, msg, meta)
         if (not self.match_self and meta['own'] or
                 meta['edit'] or meta['long']):
             return
-        text, logged = msg.content, False
+        logged = False
         for k, v in self.regexes.items():
-            m = re.match(k, text)
+            m = re.match(k, msg.content)
             if not m: continue
             if not logged:
-                self.logger.info('Trigger message: %r' % text)
+                self._log_trigger(msg)
                 logged = True
             self._process_callbacks(msg, meta, m, v)
             if not self.match_all:
