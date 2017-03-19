@@ -1981,7 +1981,7 @@ class LoggingEndpoint(HeimEndpoint):
 
     def refresh_users(self):
         """
-        refresh_users() -> None
+        refresh_users() -> msgid or None
 
         Clear the user list, and send a request to re-fill it.
         Note that the actual user list update will happen asynchronously.
@@ -1993,7 +1993,7 @@ class LoggingEndpoint(HeimEndpoint):
 
     def refresh_logs(self, n=100):
         """
-        refresh_logs(n=100) -> None
+        refresh_logs(n=100) -> msgid or None
 
         Clear the message logs, and send a request to re-fill them
         (partially). n is the amount of messages to request.
