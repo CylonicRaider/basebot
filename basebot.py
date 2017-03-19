@@ -2313,7 +2313,7 @@ class MiniBot(Bot):
         Log a message presumably triggering a response via the regexes
         mechanism.
         """
-        self.logger.into('Trigger message: %r' % msg.content)
+        self.logger.info('Trigger message: %r' % msg.content)
 
     def handle_chat_ex(self, msg, meta):
         "See Bot.handle_chat_ex() for details."
