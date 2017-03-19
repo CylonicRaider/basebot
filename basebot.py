@@ -2201,6 +2201,7 @@ class Bot(BaseBot):
         def reply(text, alttext=None):
             if text is Ellipsis:
                 text = alttext
+            self._log_command(cmdline)
             if text is not None:
                 self.send_chat(text, meta['msgid'])
         # Convenience function for checking if the command is specific and
