@@ -2491,12 +2491,14 @@ class BotManager(object):
         to the given options, and passes through arguments as bots and
         config as config.
         """
-        kwds = {'stream': sys.stderr}
+        kwds = {}
         if options.logfile is not None:
             if isinstance(options.logfile, str):
                 kwds['filename'] = options.logfile
             else:
                 kwds['stream'] = options.logfile
+        else:
+            kwds['stream'] = sys.stderr
         loglevel = options.loglevel
         logging.basicConfig(format='[%(asctime)s %(name)s %(levelname)s] '
             '%(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=loglevel,
