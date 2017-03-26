@@ -132,7 +132,7 @@ The return value of `handle_command` is, again, ignored.
 
 ### `send_chat` — Post a message
 
-    send_chat(content : str, parent = None : str) -> int
+    send_chat(content : str, parent : str = None) -> int
 
 This method — which is *not* a handler (but may be overridden anyway) — posts
 a chat message. `content` is the text of the message, `parent` is either the
