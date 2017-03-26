@@ -1,12 +1,11 @@
-% `basebot` Programmer's Manual
-% 2017-03-17
+# `basebot` Programmer's Manual
 
-# Abstract
+## Abstract
 
 This document provides an overview over the entry points into writing bots
 using `basebot`.
 
-# Introduction
+## Introduction
 
 `basebot` supports two approaches to writing bots, a
 [procedural](#procedural-approach) and an
@@ -22,7 +21,7 @@ Because the procedural approach builds upon the object-oriented, the latter
 is explained first; you can [skip to the procedural one](#procedural-approach)
 if you are not interested.
 
-# Object-oriented approach
+## Object-oriented approach
 
 The main (and historically only) way to create new bots is to inherit from
 the `basebot.Bot` class. Subclasses may override some class attributes to
@@ -50,7 +49,7 @@ There is a plethora of handler methods subclasses can override; a few notable
 ones are listed here. In every case of overriding a method, the corresponding
 method of the parent class should be invoked, or undefined behavior occurs.
 
-## `handle_chat` — Live message processing
+### `handle_chat` — Live message processing
 
     handle_chat(msg : Message, meta : dict) -> None
 
@@ -82,7 +81,7 @@ messages.
 
 The return value of `handle_chat` is ignored.
 
-## `handle_command` — Command handling
+### `handle_command` — Command handling
 
     handle_command(cmdline : list, meta : dict) -> None
 
@@ -108,7 +107,7 @@ exclamation mark `!`; the method is run after `handle_chat`.
 
 The return value of `handle_command` is, again, ignored.
 
-## Additional handlers
+### Additional handlers
 
 - `handle_login() -> None` — *Initial actions*
 
@@ -131,9 +130,9 @@ The return value of `handle_command` is, again, ignored.
     final message. `final` tells whether the log-out is a temporary
     disconnect (`False`) or the bot shutting down terminally (`True`).
 
-## `send_chat` — Post a message
+### `send_chat` — Post a message
 
-    send_chat(content : str, parent = None : str) -> int
+    send_chat(content : str, parent : str = None) -> int
 
 This method — which is *not* a handler (but may be overridden anyway) — posts
 a chat message. `content` is the text of the message, `parent` is either the
@@ -145,7 +144,7 @@ As an additional keyword-only argument, `_callback` may be passed; it is a
 function that is invoked with the `send-reply` from the server to the
 message sent above as the only argument when the reply arrives.
 
-# Procedural approach
+## Procedural approach
 
 The other bot writing approach `basebot` suppoers is procedural, and avoids
 the use of own classes altogether. Instead, (named) arguments are passed to
@@ -188,7 +187,7 @@ If a particular ordering of regular expression triggers is desired, a
 `collections.OrderedDict` instance may be passed as `regexes`; the warning
 about undefined order becomes void in that case.
 
-## Reply specifications
+### Reply specifications
 
 The following steps are applied to an object when the regular expression
 corresponding to it has matched:
@@ -235,7 +234,7 @@ Hence, the following patterns for handling a message can be highlighted:
 - A handler function processes the match and returns nothing (but has side
   effects, or stores the `reply` closure for later use).
 
-## Shared state
+### Shared state
 
 Apart from storing state globally (which is frowned upon), the callbacks
 (in fact all the ones mentioned above which have a `meta` argument) can
@@ -249,7 +248,7 @@ bot to handle state initialization / cleanup:
 - `close_cb` is similarly invoked at the very end of the bot's main loop
   with it as the only argument.
 
-# Running bots
+## Running bots
 
 `basebot` provides automated means of setting up a bot (along with other
 facilities such as logging) with two module-level functions:
@@ -264,11 +263,11 @@ facilities such as logging) with two module-level functions:
   `MiniBot` as the bot class (if none is given explicitly). See
   [above](#procedural-approach) for some arguments of note.
 
-# Advanced
+## Advanced
 
 This section covers topics not immediately needed for writing a basic bot.
 
-## Bot managers
+### Bot managers
 
 The `basebot.BotManager` class is responsible for parsing the command line,
 creating bot instances, in potentially multiple rooms, and overseeing their
@@ -308,7 +307,7 @@ no standard way for that).
 
 See also the subsection about thread safety just below.
 
-## Thread safety
+### Thread safety
 
 Each bot instance is run in an own thread; as long as there is only one or
 the bot instances do not interact with each other, no particular precautions
@@ -323,7 +322,7 @@ non-daemonic worker threads at module level; be careful not to spawn them
 in methods that may be run multiple times over the lifetime of a bot
 (unless that is intended).
 
-# Further reading
+## Further reading
 
 The inline documentation of [basebot.py](basebot.py) provides a thorough
 reference of all components included.
