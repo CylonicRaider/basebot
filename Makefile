@@ -1,9 +1,10 @@
 
 # Running the two tasks for all in parallel might wreak havoc.
 .NOTPARALLEL:
-.PHONY: all update
+.PHONY: update
 
-all: update MANUAL.pdf
+MANUAL.pdf: MANUAL.md
+	pandoc $< --toc --filter ./headings.py -V geometry=margin=1.5in -o $@
 
 # Yay! Plumbing commands!
 update:
@@ -12,6 +13,3 @@ update:
 	    -m "Import changes from 'master'" \
 	    -p $$(git rev-parse HEAD) -p $$(git rev-parse master) \
 	    $$(git write-tree))
-
-MANUAL.pdf: MANUAL.md
-	pandoc $< --toc --filter ./headings.py -V geometry=margin=1.5in -o $@
