@@ -1735,39 +1735,37 @@ class HeimEndpoint(object):
         "Main" method. Connects to the configured room, runs an event loop,
         and closes whenever that aborts (normally or due to an exception).
         """
-        def maybe_crash():
+        def maybe_crash(disconnect):
             with self.lock:
                 respawn = self.do_respawn
                 delay = self.respawn_delay
             if respawn:
-                self.logger.warning('Crashed! Will respawn...',
-                                    exc_info=True)
+                self.logger.warning('Crashed! Will respawn in %ss...' %
+                                    delay, exc_info=True)
+                if disconnect: self._disconnect(False, False)
                 time.sleep(delay)
             else:
                 self.logger.error('Crashed!', exc_info=True)
+                if disconnect: self._disconnect(False, False)
                 raise
         if self.init_cb is not None:
             self.init_cb(self)
         while 1:
-            ok = True
             try:
                 self.connect()
             except ConnectionClosedError:
                 break
             except Exception:
-                ok = False
-                maybe_crash()
+                maybe_crash(False)
                 continue
             try:
                 self.handle_loop()
             except ConnectionClosedError:
-                break
+                pass
             except Exception:
-                ok = False
-                maybe_crash()
+                maybe_crash(True)
                 continue
-            finally:
-                self._disconnect(ok, True)
+            self._disconnect(True, True)
             break
         if self.close_cb is not None:
             self.close_cb(self)
