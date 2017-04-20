@@ -50,19 +50,9 @@ import optparse
 import logging
 import threading
 
-# Modules - Py2K/Py3K compatibility.
-try:
-    import cookielib
-except ImportError:
-    import http.cookiejar as cookielib
-try:
-    from urllib2 import Request as URLRequest, addinfourl as _addinfourl
-except ImportError:
-    from urllib.request import Request as URLRequest
-    from urllib.response import addinfourl as _addinfourl
-
 # Modules - Additional. Must be installed.
 from websocket_server.compat import unicode
+from websocket_server.cookies import CookieJar, LWPCookieJar
 import websocket_server.client as websocket
 from websocket_server.exceptions import WebSocketError, ConnectionClosedError
 
@@ -851,16 +841,6 @@ class HeimEndpoint(object):
     # Default nick-name. Can be overridden by subclasses.
     NICKNAME = None
 
-    class _FakeFile:
-        """"
-        A fake file-like object that allows some Py2K guts not to crash
-        whilst not passing them a real file that would let them crash
-        in other ways.
-        """
-        def read(self): return ''
-        def readline(self): return ''
-        def close(self): pass
-
     def __init__(self, **config):
         "Initializer. See class docstring for invocation details."
         self.url_template = config.get('url_template', URL_TEMPLATE)
@@ -901,66 +881,19 @@ class HeimEndpoint(object):
     def __exit__(self, *args):
         return self.lock.__exit__(*args)
 
-    def _prepare_headers(self, url):
-        """
-        _prepare_headers(url) -> (request, dict)
-
-        Return a request object and a mapping of HTTP headers to be
-        passed along with a request.
-        The request object is passed through to _extract_headers(),
-        the header mapping is passed to WebSocket connection
-        creation.
-        The default implementation implements cookie handling.
-        """
-        req, headers = None, {}
-        if self.manager:
-            with self.manager:
-                if self.manager.cookiejar is not None:
-                    req = URLRequest(url)
-                    self.manager.cookiejar.add_cookie_header(req)
-                    for k, v in req.header_items():
-                        if not k.startswith('Cookie'): continue
-                        headers[k] = v
-        return (req, headers)
-
-    def _extract_headers(self, request, websocket):
-        """
-        _extract_headers(request, websocket) -> websocket
-
-        Post-process response headers from the WebSocket.
-        request is the same-named object returned by _prepare_headers(),
-        websocket is the to-be return value of _make_connection(), an
-        instance of JSONWebSocket.
-        The websocket argument (or an equivalent object) is returned.
-        The default implementation implements cookie handling.
-        """
-        if self.manager and request:
-            try:
-                response = websocket.ws.response
-            except Exception:
-                return websocket
-            response = _addinfourl(self._FakeFile(), response.msg,
-               request.get_full_url(), response.status)
-            with self.manager:
-                if self.manager.cookiejar is None: return websocket
-                self.manager.cookiejar.extract_cookies(response, request)
-                self.manager.cookiejar.save()
-        return websocket
-
     def _make_connection(self, url, timeout):
         """
         _make_connection(url, timeout) -> JSONWebSocket
 
         Actually connect to url, with a time-out setting of timeout.
         Returns the object produced, or raises an exception.
-        Can be hooked by subclasses, usage of _prepare_headers() and
-        _extract_headers() is recommended as far as appropriate.
         """
         self.logger.info('Connecting to %s...' % url)
-        req, headers = self._prepare_headers(url)
-        ret = JSONWebSocket(websocket.connect(url, headers=headers,
+        with self.manager:
+            jar = self.manager.cookiejar
+        ret = JSONWebSocket(websocket.connect(url, cookies=jar,
                                               timeout=timeout))
-        ret = self._extract_headers(req, ret)
+        if jar: jar.save()
         self.logger.info('Connected.')
         return ret
 
@@ -2392,9 +2325,9 @@ class BotManager(object):
     lock     : A threading.RLock instance used for serializing attribute
                access. The __enter__ and __exit__ methods of the lock are
                exposed under the same names.
-    cookiejar: A CookieJar instance from the cookielib / http.cookiejar
-               module resonsible for storing cookies, or None. HeimEndpoint
-               handles cookies (if the manager attribute is correctly set)
+    cookiejar: A CookieJar instance from the websocket_server.cookies module
+               resonsible for storing cookies, or None. HeimEndpoint handles
+               cookies (if the manager attribute is correctly set)
                transparently.
     """
 
@@ -2562,19 +2495,6 @@ class BotManager(object):
             mgr.add_bot(mgr.make_bot(*d))
         return mgr
 
-    class WebsocketCookiePolicy(cookielib.DefaultCookiePolicy):
-        """"
-        Custom DefaultCookiePolicy subclass that allows both https and wss
-        schemes for "secure" cookies.
-        """
-        def return_ok_secure(self, cookie, request):
-            if not cookie.secure: return True
-            try:
-                reqtype = request.get_type()
-            except AttributeError:
-                reqtype = request.type
-            return (reqtype in ('https', 'wss'))
-
     def __init__(self, **config):
         "Initializer. See class docstring for invocation details."
         self.botcls = config.get('botcls', None)
@@ -2611,12 +2531,10 @@ class BotManager(object):
         if self.cookies is None:
             self.cookiejar = None
         elif self.cookies is Ellipsis:
-            self.cookiejar = cookielib.CookieJar(
-                policy=self.WebsocketCookiePolicy())
+            self.cookiejar = CookieJar()
             self.cookiejar.save = lambda: None
         elif isinstance(self.cookies, str):
-            self.cookiejar = cookielib.LWPCookieJar(self.cookies,
-                policy=self.WebsocketCookiePolicy())
+            self.cookiejar = LWPCookieJar(self.cookies)
             try:
                 self.cookiejar.load()
             except IOError:
