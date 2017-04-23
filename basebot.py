@@ -43,7 +43,7 @@ run_minibot()    : Same as run_bot(), but with MiniBot as a default for the
 __version__ = "2.0"
 
 # Modules - Standard library
-import sys, os, re, time
+import sys, os, re, time, stat
 import collections, json
 import itertools
 import optparse
@@ -2534,11 +2534,9 @@ class BotManager(object):
             self.cookiejar = CookieJar()
             self.cookiejar.save = lambda: None
         elif isinstance(self.cookies, str):
-            self.cookiejar = LWPCookieJar(self.cookies)
-            try:
-                self.cookiejar.load()
-            except IOError:
-                pass
+            self.cookiejar = LWPCookieJar(self.cookies,
+                stat.S_IRUSR | stat.S_IWUSR)
+            self.cookiejar.load()
         else:
             raise TypeError('Bad "cookies" configuration parameter.')
 
