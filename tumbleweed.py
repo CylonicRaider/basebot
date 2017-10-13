@@ -11,7 +11,7 @@ import threading
 
 import basebot
 
-DELAY = 600.0
+DELAY = 3600.0
 
 # Background thread initiating the roll-bys.
 def waiter(inst, cond):
