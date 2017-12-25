@@ -1,5 +1,4 @@
 
-# Running the two tasks for all in parallel might wreak havoc.
 .NOTPARALLEL:
 .PHONY: update
 
