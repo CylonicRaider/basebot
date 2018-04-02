@@ -1780,6 +1780,9 @@ class LoggingEndpoint(HeimEndpoint):
     def handle_any(self, packet):
         "See HeimEndpoint.handle_any() for details."
         HeimEndpoint.handle_any(self, packet)
+        if packet.get('throttled'):
+            self.logger.warning('Throttle warning received, reason %r' %
+                                (packet.get('throttled_reason'),))
         if packet.type in ('edit-message-reply', 'send-reply',
                            'edit-message-event', 'send-event'):
             msgid = packet.data.id
