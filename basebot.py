@@ -2561,7 +2561,7 @@ class BotManager(object):
         """
         shutdown() -> None
 
-        Stop all the bots current running.
+        Stop all the bots currently running.
         """
         with self.lock:
             self._shutting_down = True
