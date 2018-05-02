@@ -1022,10 +1022,10 @@ class HeimEndpoint(object):
             if self._logged_in:
                 self.handle_logout(ok, final)
                 self._logged_in = False
+            self.handle_close(ok, final)
             self._nick_set = False
             conn = self._connection
             self._connection = None
-            self.handle_close(ok, final)
             self._conncond.notifyAll()
         if conn is not None:
             conn.close()
