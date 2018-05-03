@@ -173,9 +173,9 @@ The following functionality is only present at `MiniBot`:
 
 - `regexes`: A mapping from regular expression strings to [reply
   specifications](#reply-specifications). The regular expressions are
-  matched against the beginning of the message in traversal order, _i.e._,
-  in general, **in undefined order**, and the value corresponding to the
-  first regular expression that matched is used.
+  matched against the message (using `re.search()`) in traversal order,
+  _i.e._, in general, **in undefined order**, and the value corresponding to
+  the first regular expression that matched is used.
 - `match_self`: If the argument is absent or false (the default), messages
   from the bot itself are *not* interpreted by it to avoid infinite loops;
   if true, they are.
