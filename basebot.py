@@ -2191,7 +2191,7 @@ class MiniBot(Bot):
                 regex-object pairs, which will be converted to an ordered
                 mapping implicitly. Each incoming message is checked against
                 the keys of it (in the order the mapping's iterator returns
-                them) by re.match(), and, if the regex matches, the
+                them) by re.search(), and, if the regex matches, the
                 corresponding value will be processed as described below.
     match_self: Whether messages from oneself should be replied to. Defaults
                 to False, meaning no.
@@ -2257,7 +2257,7 @@ class MiniBot(Bot):
             return
         logged = False
         for k, v in self.regexes.items():
-            m = re.match(k, msg.content)
+            m = re.search(k, msg.content)
             if not m: continue
             if not logged:
                 self._log_trigger(msg)
