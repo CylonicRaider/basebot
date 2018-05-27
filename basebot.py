@@ -46,7 +46,7 @@ __version__ = "2.0"
 import sys, os, re, time, stat
 import collections, json
 import itertools
-import optparse
+import argparse
 import logging
 import threading
 
@@ -2349,7 +2349,7 @@ class BotManager(object):
     @classmethod
     def create_parser(cls, config, kwds=None):
         """
-        create_parser(config, kwds=None) -> optparse.OptionParser
+        create_parser(config, kwds=None) -> argparse.ArgumentParser
 
         Create a new option parser.
         config is ignored, kwds (if not None) is passed as keyword arguments
@@ -2359,14 +2359,14 @@ class BotManager(object):
         if kwds is None: kwds = {}
         kwds.setdefault('description', 'Default values for the options are '
                         'given in parentheses.')
-        return optparse.OptionParser(**kwds)
+        return argparse.ArgumentParser(**kwds)
 
     @classmethod
     def prepare_parser(cls, parser, config):
         """
         prepare_parser(parser, config) -> None
 
-        Add custom options to parser (an optparse.OptionParser) instance.
+        Add custom options to parser (an argparse.ArgumentParser instance).
         config is the dictionary of the arguments specified to run_main().
         The default implementation adds the --url-template, --nickname,
         --retry-count, --retry-delay, --cookies, --temp-cookies, --respawn,
@@ -2374,76 +2374,76 @@ class BotManager(object):
         where the last two are used by BotManager.prepare_main(), and the
         others are mapped to corresponding keyword arguments.
         """
-        parser.add_option('--url-template', dest='url_template',
-                          metavar='<url>',
-                          help='WebSocket URL template '
-                              '(default: wss://euphoria.io/room/{}/ws)')
-        parser.add_option('--nickname', dest='nickname', metavar='<nick>',
-                          help='Nick-name to use (none)')
-        parser.add_option('--retry-count', type=int, dest='retry_count',
-                          metavar='<int>',
-                          help='Amount of re-tries for connection '
-                              'operations (4, plus initial attempt)')
-        parser.add_option('--retry-delay', type=float, dest='retry_delay',
-                          metavar='<time>',
-                          help='Delay between connection operation '
-                              'attempts (10s)')
-        parser.add_option('--cookies', dest='cookies', metavar='<path>',
-                          help='File to store cookies (and to read them '
-                              'from); not safe with multiple bot processes '
-                              'accessing the same file')
-        parser.add_option('--temp-cookies', action='store_const',
-                          dest='cookies', const=Ellipsis,
-                          help='Store cookies in volatile memory; useful '
-                              'if those are necessary (for accounts), but '
-                              'not desired beyound that')
-        parser.add_option('--respawn', action='store_true',
-                          dest='do_respawn',
-                          help='Respawn crashed bots')
-        parser.add_option('--no-respawn', action='store_false',
-                          dest='do_respawn',
-                          help='Do not respawn crashed bots (default)')
-        parser.add_option('--respawn-delay', type=float,
-                          dest='respawn_delay', metavar='<time>',
-                          help='Delay between crashed bot respawns '
-                              '(10s)')
-        parser.add_option('--loglevel', dest='loglevel', metavar='<level>',
-                          default=config.get('loglevel', logging.INFO),
-                          help='Log level to use (INFO)')
-        parser.add_option('--logfile', dest='logfile', metavar='<file>',
-                          default=config.get('logfile'),
-                          help='File to log to (standard error)')
+        parser.add_argument('--url-template', metavar='URL',
+                            help='WebSocket URL template '
+                                '(wss://euphoria.io/room/{}/ws)')
+        parser.add_argument('--nickname', metavar='NICK',
+                            help='Nick-name to use (none)')
+        parser.add_argument('--retry-count', type=int, metavar='COUNT',
+                            help='Amount of re-tries for connection '
+                                'operations (4, not counting initial '
+                                'attempt)')
+        parser.add_argument('--retry-delay', type=float, metavar='TIME',
+                            help='Delay between connection operation '
+                                'attempts in seconds (10)')
+        parser.add_argument('--cookies', metavar='PATH',
+                            help='File to store cookies (and to read them '
+                                'from); not safe with multiple bot processes '
+                                'accessing the same file (default is no '
+                                'cookies)')
+        parser.add_argument('--temp-cookies', action='store_const',
+                            dest='cookies', const=Ellipsis,
+                            help='Store cookies in volatile memory; useful '
+                                'if those are necessary (for accounts), but '
+                                'not desired beyound that')
+        parser.add_argument('--respawn', action='store_true',
+                            dest='do_respawn',
+                            help='Respawn crashed bots')
+        parser.add_argument('--no-respawn', action='store_false',
+                            dest='do_respawn',
+                            help='Do not respawn crashed bots (default)')
+        parser.add_argument('--respawn-delay', type=float, metavar='TIME',
+                            help='Delay between crashed bot respawns in '
+                                'seconds (10)')
+        parser.add_argument('--loglevel', metavar='LEVEL',
+                            default=config.get('loglevel', logging.INFO),
+                            help='Log level to use')
+        parser.add_argument('--logfile', metavar='FILE',
+                            default=config.get('logfile'),
+                            help='File to log to (standard error)')
+        parser.add_argument('rooms', metavar='ROOM', nargs='*',
+                            help='Rooms to connect to')
 
     @classmethod
-    def interpret_args(cls, options, arguments, config):
+    def interpret_args(cls, arguments, config):
         """
-        interpret_args(options, arguments, config) -> (bots, config)
+        interpret_args(arguments, config) -> (bots, config)
 
         Actually perform running preparations for running, and generate
         parameters from_config().
         The default implementation initializes the logging module according
-        to the given options, and passes through arguments as bots and
-        config as config.
+        to the given arguments, returns value of the "rooms" positional
+        argument as bots, and passes through config as config.
         """
         kwds = {}
-        if options.logfile is not None:
-            if isinstance(options.logfile, str):
-                kwds['filename'] = options.logfile
+        if arguments.logfile is not None:
+            if isinstance(arguments.logfile, str):
+                kwds['filename'] = arguments.logfile
             else:
-                kwds['stream'] = options.logfile
+                kwds['stream'] = arguments.logfile
         else:
             kwds['stream'] = sys.stderr
-        loglevel = options.loglevel
+        loglevel = arguments.loglevel
         logging.basicConfig(format='[%(asctime)s %(name)s %(levelname)s] '
             '%(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=loglevel,
             **kwds)
         for name in ('url_template', 'nickname', 'retry_count',
                      'retry_delay', 'cookies', 'do_respawn',
                      'respawn_delay'):
-            value = getattr(options, name)
+            value = getattr(arguments, name)
             if value is not None:
                 config[name] = value
-        return (arguments, config)
+        return (arguments.rooms, config)
 
     @classmethod
     def prepare_main(cls, config):
@@ -2459,15 +2459,13 @@ class BotManager(object):
         order:
         - parser = create_parser(config)
         - prepare_parser(parser, config)
-        - options, arguments = parser.parse_args(config.get('argv',
-                                                            sys.argv[1:]))
-        - return interpret_args(options, arguments, config)
+        - arguments = parser.parse_args(config.get('argv', sys.argv[1:]))
+        - return interpret_args(arguments, config)
         """
         parser = cls.create_parser(config)
         cls.prepare_parser(parser, config)
-        options, arguments = parser.parse_args(config.get('argv',
-                                                          sys.argv[1:]))
-        return cls.interpret_args(options, arguments, config)
+        arguments = parser.parse_args(config.get('argv', sys.argv[1:]))
+        return cls.interpret_args(arguments, config)
 
     @classmethod
     def from_config(cls, bots, config):
