@@ -278,24 +278,24 @@ The manager class to use can be specified using the `mgrcls` keyword argument
 to `run_bot` or `run_minibot`; its (class) methods are invoked by the latters
 for the principial actions. Of note are the following:
 
-- `prepare_parser(parser : optparse.OptionParser, config : dict) -> None` —
-  *Option parser initialization*
+- `prepare_parser(parser : argparse.ArgumentParser, config : dict) -> None` —
+  *Argument parser initialization*
 
     This method declares command-line options; refer to the [Python
-    documentation](https://docs.python.org/library/optparse.html) for
-    details (see in particular the `add_option` method). `config` is the
+    documentation](https://docs.python.org/library/argparse.html) for
+    details (see in particular the `add_argument` method). `config` is the
     dictionary of keyword arguments as passed to `run_bot` or `run_minibot`.
 
-- `interpret_args(options : object, arguments : list, config : dict) ->
-  (bots : list, config : dict)` — *Argument processing*
+- `interpret_args(arguments : object, config : dict) -> (bots : list,
+  config : dict)` — *Argument processing*
 
-    This method receives the option namespace, the argument list, and the
-    `config` object mentioned above as arguments and returns a list of
-    bot specifications and a keyword argument dictionary for the `BotManager`
-    constructor. Overriding classes are advised to invoke the parent class'
-    method and to amend the `config` returned by it with values from the
-    `options` object, transforming as necessary; these get passed down to
-    the `BotManager` constructor and to the bots' constructors.
+    This method receives the argument values and the `config` object mentioned
+    above as arguments and returns a list of bot specifications and a keyword
+    argument dictionary for the `BotManager` constructor. Overriding classes
+    are advised to invoke the parent class' method and to amend the `config`
+    returned by it with values from the `arguments` object, transforming as
+    necessary; these get passed down to the `BotManager` constructor and to
+    the bots' constructors.
 
 The constructor of a subclass should pass all positional and keyword
 arguments on to the parent class constructor and perform initialization as
