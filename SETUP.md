@@ -7,29 +7,30 @@ library, including launching an example bot.
 
 ## Installation
 
-1. The presence of a working [Python](http://www.python.org/downloads)
+1. The presence of a working [Python](https://www.python.org/downloads)
    installation is silently assumed, including — depending on your desired
    way of installation — the `pip` tool with support for Git repositories.
 
 2. First of all, the dependency of the library,
-   [`websocket-server`](http://github.com/CylonicRaider/websocket-server/)
-   has to be installed (if it is not as yet). For that, either download and
-   extract the source archive from the linked page and run the `setup.py`
-   file, or — if you have `pip` installed — run
+   [`websocket-server`](https://github.com/CylonicRaider/websocket-server/)
+   has to be installed (if it is yet). For that, either download and extract
+   the source archive from the linked page and run the `setup.py` file, or
+   — if you have `pip` installed — run
 
    ```
    pip install -v git+https://github.com/CylonicRaider/websocket-server.git/
    ```
 
-   **Important**: Depending on the Python version you want to use, you may
-   have to adapt the command lines (`python setup.py` → `python3 setup.py`;
-   `pip install -v ...` → `pip3 install -v ...`), or install the library for
-   both Python versions (both `python setup.py` *and* `python3 setup.py`).
+   Depending on the Python version (2 or 3) you want to use, you may have to
+   adapt the command line.
 
-3. The installation of `basebot` itself is trivial, aside from running
-   the provided `setup.py` file with the Python version desired, you can
-   either copy the `basebot.py` file into the directory where you will store
-   your source files, or to some location in the standard module search path.
+   For convenience, a matching version of the library is bundled with
+   `basebot`; to install it, ensure its Git submodule is up-to-date
+   (by running `git submodule update --init`) and invoke the `setup.py` file
+   in the `.websocket-server` subdirectory.
+
+3. The installation of `basebot` itself is trivial; run the `setup.py` file
+   using the desired Python version.
 
 4. **Done**!
 
@@ -41,7 +42,7 @@ in your source location (either the directory where `basebot.py` lies, or
 anywhere if the latter is in the standard module path), and start the bot
 from the command line by running `python testbot.py test` in the
 corresponding directory. The bot should appear in the room
-[*&test*](http://euphoria.io/room/test) under the nickname *test*.
+[*&test*](https://euphoria.io/room/test) under the nickname *test*.
 
 ```python
 import sys, basebot
@@ -84,7 +85,7 @@ or use your favorite documentation generator.
 
 ### Alternative sites
 
-The bot library has the domain name [euphoria.io](http://euphoria.io)
+The bot library has the domain name [euphoria.io](https://euphoria.io)
 built-in as a default. If you want to run a bot at an alternative site, you
 can achieve that by setting the `BASEBOT_URL_TEMPLATE` environment variable,
 or the `--url-template` command-line option. It is `{}`-formatted by the bot
