@@ -2123,6 +2123,23 @@ class Bot(BaseBot):
         self.aliases = config.get('aliases', [])
         self.started = config.get('started', time.time())
 
+    def nick_matches(self, name):
+        """
+        nick_matches(name) -> bool
+
+        Return whether the given nickname matches the nickname or any alias
+        of this bot. Matching is whitespace- and case-insensitive, done by
+        comparing results of normalize_nick().
+        This is useful for commands that @-mention the bot.
+        """
+        nn = normalize_nick(name)
+        if nn == normalize_nick(self.eff_nickname or self.nickname or ''):
+            return True
+        for i in self.aliases:
+            if nn == normalize_nick(i):
+                return True
+        return False
+
     def handle_command(self, cmdline, meta):
         """
         handle_command(cmdline, meta) -> None
@@ -2140,39 +2157,30 @@ class Bot(BaseBot):
                 self.send_chat(text, meta['msgid'])
         # Convenience function for checking if the command is specific and
         # matches myself.
-        def nick_matches():
+        def specific_command_matches():
             if len(cmdline) != 2:
                 return False
             ms = cmdline[1]
-            if not ms.startswith('@'): return False
-            nn = normalize_nick(ms[1:])
-            if nn == normnick:
-                return True
-            for i in self.aliases:
-                if nn == normalize_nick(i):
-                    return True
-            return False
+            return (ms.startswith('@') and self.nick_matches(ms[1:]))
         # Call parent class method.
         BaseBot.handle_command(self, cmdline, meta)
         # Don't continue if no command or explicitly forbidden.
         if not cmdline or not self.do_stdcommands:
             return
-        # Used in nick_matches().
-        normnick = normalize_nick(self.eff_nickname or self.nickname or '')
         # Actual commands.
         if cmdline[0] == '!ping':
             if len(cmdline) == 1:
                 reply(self.ping_text)
-            elif nick_matches():
+            elif specific_command_matches():
                 reply(self.spec_ping_text, self.ping_text)
         elif cmdline[0] == '!help':
             if len(cmdline) == 1:
                 reply(self.short_help)
-            elif nick_matches():
+            elif specific_command_matches():
                 reply(self.long_help, self.short_help)
         elif cmdline[0] == '!uptime':
             if (self.do_gen_uptime and len(cmdline) == 1 or
-                    self.do_uptime and nick_matches()):
+                    self.do_uptime and specific_command_matches()):
                 if self.started is None:
                     reply("/me Uptime information is N/A")
                 else:
