@@ -8,29 +8,32 @@ library, including launching an example bot.
 ## Installation
 
 1. The presence of a working [Python](https://www.python.org/downloads)
-   installation is silently assumed, including — depending on your desired
-   way of installation — the `pip` tool with support for Git repositories.
+   installation is silently assumed, including — depending on your desired way
+   of installation — the `pip` tool with support for Git repositories.
 
 2. First of all, the dependency of the library,
    [`websocket-server`](https://github.com/CylonicRaider/websocket-server/)
    has to be installed (if it is yet). For that, either download and extract
-   the source archive from the linked page and run the `setup.py` file, or
-   — if you have `pip` installed — run
+   the source archive from the linked page and run `setup.py install`, or run
 
    ```
-   pip install -v git+https://github.com/CylonicRaider/websocket-server.git/
+   pip install -v git+https://github.com/CylonicRaider/websocket-server/
    ```
 
    Depending on the Python version (2 or 3) you want to use, you may have to
    adapt the command line.
 
    For convenience, a matching version of the library is bundled with
-   `basebot`; to install it, ensure its Git submodule is up-to-date
-   (by running `git submodule update --init`) and invoke the `setup.py` file
-   in the `.websocket-server` subdirectory.
+   `basebot`; to install it, ensure its Git submodule is up-to-date (by
+   running `git submodule update --init`) and run `setup.py install` in the
+   `.websocket-server` subdirectory.
 
-3. The installation of `basebot` itself is trivial; run the `setup.py` file
-   using the desired Python version.
+3. The installation of `basebot` itself is trivial; download the source code
+   and invoke `setup.py install` using the desired Python version, or run
+
+   ```
+   pip install -v git+https://github.com/CylonicRaider/basebot/
+   ```
 
 4. **Done**!
 
