@@ -76,6 +76,11 @@ if __name__ == '__main__':
                  '^!calc\s+(\d+)\s*([-+*/])\s*(\d+)$': calculator})
 ```
 
+### Bot template
+
+There is a template file for simple bots in the [template.py](template.py)
+file for your convenience.
+
 ## Further/advanced notes
 
 ### Further reading
