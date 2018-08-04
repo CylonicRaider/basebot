@@ -13,8 +13,9 @@ library, including launching an example bot.
 
 2. First of all, the dependency of the library,
    [`websocket-server`](https://github.com/CylonicRaider/websocket-server/)
-   has to be installed (if it is yet). For that, either download and extract
-   the source archive from the linked page and run `setup.py install`, or run
+   has to be installed (if it has not been yet). For that, either download and
+   extract the source archive from the linked page and run `setup.py install`,
+   or run
 
    ```
    pip install -v git+https://github.com/CylonicRaider/websocket-server/
