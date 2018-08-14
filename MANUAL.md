@@ -165,8 +165,9 @@ The following argument may be used to implement the functionality of a bot
 (defined indeed by parents of the `Bot` class):
 
 - `command_handlers`: A mapping from command names (*without* the leading
-  exclamation marks `!`) to (only) functions, which are invoked when the
-  command identified by the key is encountered; the signature of the
+  exclamation marks `!`; the `None` singleton matches any command) to
+  functions (or lists of functions, but not strings), which are invoked when
+  the command identified by the key is encountered; the signature of the
   handler functions is the same as of `handle_command` above.
 
 The following functionality is only present at `MiniBot`:

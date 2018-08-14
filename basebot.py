@@ -1949,10 +1949,11 @@ class BaseBot(LoggingEndpoint):
     positional argument (it may still be specified as a keyword argument).
 
     Attributes (settable via config):
-    command_handlers: Mapping of command name strings to lists of handler
-                      callables for the command. Called as handle_command(),
-                      see there. Handlers for the None command (similarly to
-                      packet handlers for None) are called for any command.
+    command_handlers: Mapping from command name strings to handler callables
+                      (or lists thereof) for the command. Called as
+                      handle_command(), see there. Handlers for the None
+                      command (similarly to packet handlers for None) are
+                      called for every command.
     log_commands    : Print a logging message about every command received.
                       Defaults to True.
     """
@@ -2005,7 +2006,9 @@ class BaseBot(LoggingEndpoint):
         cmdline.
         """
         logged = False
-        for h in self.command_handlers.get(cmd, ()):
+        handlers = self.command_handlers.get(cmd, ())
+        if callable(handlers): handlers = (handlers,)
+        for h in handlers:
             if not logged:
                 self._log_command(cmdline)
                 logged = True
@@ -2046,7 +2049,11 @@ class BaseBot(LoggingEndpoint):
         """
         with self.lock:
             l = self.command_handlers.setdefault(cmd, [])
-            if handler not in l: l.append(handler)
+            if callable(l):
+                l = [l]
+                self.command_handlers[cmd] = l
+            if handler not in l:
+                l.append(handler)
 
     def remove_command_handler(self, handler):
         """
@@ -2055,7 +2062,11 @@ class BaseBot(LoggingEndpoint):
         Remove any bindings of the given handler.
         """
         with self.lock:
-            for e in self.command_handlers.values():
+            for k, e in tuple(self.command_handlers.items()):
+                if e is handler:
+                    del self.command_handlers[k]
+                elif callable(e):
+                    continue
                 try:
                     e.remove(handler)
                 except ValueError:
