@@ -146,7 +146,7 @@ message sent above as the only argument when the reply arrives.
 
 ## Procedural approach
 
-The other bot writing approach `basebot` suppoers is procedural, and avoids
+The other bot writing approach `basebot` supports is procedural, and avoids
 the use of own classes altogether. Instead, (named) arguments are passed to
 the `basebot.run_minibot` function (or, alternatively, to the constructor of
 `basebot.MiniBot`, which inherits from `basebot.Bot`) for setting all
