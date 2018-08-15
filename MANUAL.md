@@ -11,8 +11,8 @@ using `basebot`.
 [procedural](#procedural-approach) and an
 [object-oriented](#object-oriented-approach) one. Both are equivalently
 powerful; however, although simple bots are written quickly using the
-procedural approach, implementing more complex functionality in it can become
-ugly as quickly.
+procedural approach, implementing more complex functionality using it can
+become ugly as quickly.
 
 For actually running a bot (be it in production or testing), see the
 [corresponding section](#running-bots).
@@ -40,14 +40,14 @@ provide normally static values:
   singleton)_, the value of `SHORT_HELP` is used instead. Otherwise, this is
   replied with to a specific `!help` command.
 
-The constructor of the subclass should pass all positional and keyword
-arguments on to the parent class constructor. Some keyword arguments may be
-passed to the parent class' constructor to tune responses to standard
-commands; refer to the [reference](#further-reading) for details.
+The constructor of the subclass should pass all keyword arguments (and all
+positional arguments, as applicable) on to the parent class constructor. Some
+of those may be used to tune responses to standard commands; refer to the
+[reference](#further-reading) for details.
 
 There is a plethora of handler methods subclasses can override; a few notable
 ones are listed here. In every case of overriding a method, the corresponding
-method of the parent class should be invoked, or undefined behavior occurs.
+method of the parent class must be invoked, or undefined behavior occurs.
 
 ### `handle_chat` — Live message processing
 
@@ -59,22 +59,29 @@ messages.
 
 - `msg` is a [`Message`](http://api.euphoria.io/#message) structure,
   presented as an instance of the `basebot.Record` class that is a dictionary
-  exposing some items as attributes. The most interesting parts of it are
-  found at:
+  exposing some items as attributes. The most interesting parts of it (but not
+  all; refer to the [reference](#further-reading) for details) are found at:
     - `msg.id`: The ID of the message.
     - `msg.parent`: The ID of the parent of the message, or `None`.
-    - `msg.sender.id`: The (agent) ID of the sender of the message.
+    - `msg.sender.id`: The user ID of the sender of the message. This may be
+      an `account:` ID for a user logged into an account, or an `agent:` ID
+      otherwise.
     - `msg.sender.name`: The nickname of the sender of the message.
     - `msg.content`: The content of the message.
 
 - `meta` is an ordinary dictionary holding miscellaneous meta-information
   about the message; most notable is:
-    - `reply`: A convenience function that, when called, posts a message
-      as a reply to the message currently being handled (the concrete ID for
-      each instance is stored in the closure and does not change when another
-      message is handled). As an additional argument, a callback may be
-      specified that is called with the server's `send-reply` to "our" reply
-      as an argument.
+    - `reply`: A convenience function with the following signature:
+
+          reply(content : str, callback : callable = None) -> int
+
+      This posts a message with a content of `content` as a reply to the
+      message currently being handled (the concrete ID for each instance is
+      stored in the closure and does not change when another message is
+      handled). `callback`, if specified, is called with the server's
+      `send-reply` to "our" reply as the only argument when the server accepts
+      the message; see [`send_chat()`](#send_chat-Post-a-message) for details.
+      The return value is the sequence ID of the `send` packet submitted.
 
     Further members are omitted here; see the [reference](#further-reading)
     for a full listing.
@@ -140,13 +147,17 @@ ID of the parent of the tentative message, or `None` for starting a new
 thread. The function returns the sequence ID (`id` in [the packet
 descritpion](http://api.euphoria.io/#packets)) of the `send` submitted.
 
-As an additional keyword-only argument, `_callback` may be passed; it is a
-function that is invoked with the `send-reply` from the server to the
-message sent above as the only argument when the reply arrives.
+An additional keyword-only argument `_callback` may be passed; it is a
+function with the following signature:
+
+    callback(packet : Packet) -> None
+
+The callback is invoked with the server's `send-reply` to "our" `send` (when
+it arrives) as the only argument. The return value is ignored.
 
 ## Procedural approach
 
-The other bot writing approach `basebot` suppoers is procedural, and avoids
+The other bot writing approach `basebot` supports is procedural, and avoids
 the use of own classes altogether. Instead, (named) arguments are passed to
 the `basebot.run_minibot` function (or, alternatively, to the constructor of
 `basebot.MiniBot`, which inherits from `basebot.Bot`) for setting all
@@ -209,7 +220,8 @@ corresponding to it has matched:
     - `reply`: A function that, when called, posts a message as a reply to
       the current message. As an additional argument, a callback may be
       passed that is called with the server's `send-reply` to "our" reply as
-      the argument.
+      the argument. See the description of `reply` in the section above for
+      more details.
 
     Additional members can be found in the [reference](#further-reading).
 
