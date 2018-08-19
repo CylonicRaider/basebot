@@ -8,35 +8,33 @@ library, including launching an example bot.
 ## Installation
 
 1. The presence of a working [Python](https://www.python.org/downloads)
-   installation is silently assumed, including — depending on your desired way
-   of installation — the `pip` tool with support for Git repositories.
+   installation is silently assumed, including the `pip` tool.
 
 2. First of all, the dependency of the library,
    [`websocket-server`](https://github.com/CylonicRaider/websocket-server/)
-   has to be installed (if it has not been yet). For that, either download and
-   extract the source archive from the linked page and run `setup.py install`,
-   or run
+   has to be installed (if it has not been yet). For that, run
 
    ```
-   pip install -v git+https://github.com/CylonicRaider/websocket-server/
+   pip install https://github.com/CylonicRaider/websocket-server/archive/master.zip
    ```
 
-   Depending on the Python version (2 or 3) you want to use, you may have to
-   adapt the command line.
-
-   For convenience, a matching version of the library is bundled with
-   `basebot`; to install it, ensure its Git submodule is up-to-date (by
-   running `git submodule update --init`) and run `setup.py install` in the
-   `.websocket-server` subdirectory.
-
-3. The installation of `basebot` itself is trivial; download the source code
-   and invoke `setup.py install` using the desired Python version, or run
+3. To install `basebot` itself, run
 
    ```
-   pip install -v git+https://github.com/CylonicRaider/basebot/
+   pip install https://github.com/CylonicRaider/basebot/archive/master.zip
    ```
 
 4. **Done**!
+
+Depending on the Python version you use, the above command lines may need to
+be adapted (_e.g._, `pip` → `pip3`). You can also manually download (or clone)
+the repositories and run their `setup.py` files; this is what `pip` does
+automatically.
+
+For convenience, a matching version of the `websocket-server` library is
+bundled with `basebot`; to install it, ensure its Git submodule is up-to-date
+(by running `git submodule update --init`) and run `setup.py install` in the
+`.websocket-server` subdirectory.
 
 ## Testing / example bot
 
