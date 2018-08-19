@@ -36,6 +36,12 @@ bundled with `basebot`; to install it, ensure its Git submodule is up-to-date
 (by running `git submodule update --init`) and run `setup.py install` in the
 `.websocket-server` subdirectory.
 
+### Troubleshooting
+
+If you get permission errors, try running the commands above with a `--user`
+switch (`pip install --user ...`), or install the packages in a [virtual
+environment](https://docs.python.org/glossary.html#term-virtual-environment).
+
 ## Testing / example bot
 
 The best way to test whether the installation has succeeded is to run a bot.
