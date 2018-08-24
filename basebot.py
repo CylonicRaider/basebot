@@ -1752,6 +1752,8 @@ class LoggingEndpoint(HeimEndpoint):
         if self.log_users:
             if packet.type == 'who-reply':
                 self.users.add(*packet.data)
+            elif packet.type == 'hello-event':
+                self.users.add(packet.data['session'])
             elif packet.type == 'snapshot-event':
                 self.users.add(*packet.data['listing'])
             elif packet.type == 'network-event':
