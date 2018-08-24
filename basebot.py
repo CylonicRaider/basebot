@@ -2581,9 +2581,14 @@ class BotManager(object):
         Stop all the bots currently running.
         """
         with self.lock:
+            # On the first call, we delegate to the parent (if any), and
+            # actually shutdown on the second call coming from the parent.
+            p = None if self._shutting_down else self.parent
             self._shutting_down = True
             l = list(self.bots)
             c = list(self.children)
+        if p:
+            return p.shutdown()
         for b in l:
             b.close()
         for m in c:
