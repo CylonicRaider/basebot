@@ -2630,9 +2630,8 @@ class BotManager(object):
         May raise a TypeError if self.botcls is None.
         """
         with self.lock:
-            if self.botcls is None:
-                raise TypeError('Bot class not specified')
-            cls = self.botcls
+            cls = config.get('botcls', self.botcls)
+            if cls is None: raise TypeError('Bot class not specified')
             cfg = dict(self.botcfg, **config)
             if roomname is not Ellipsis: cfg['roomname'] = roomname
             if passcode is not Ellipsis: cfg['passcode'] = passcode
