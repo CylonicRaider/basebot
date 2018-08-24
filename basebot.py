@@ -2522,6 +2522,7 @@ class BotManager(object):
         self.botname = config.get('botname',
                                   getattr(self.botcls, 'BOTNAME', '<Bot>'))
         self.bots = config.get('bots', [])
+        self.parent = config.get('parent', None)
         self.children = config.get('children', [])
         self.cookies = config.get('cookies', None)
         self.logger = config.get('logger', logging.getLogger())
