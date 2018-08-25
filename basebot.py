@@ -875,6 +875,8 @@ class HeimEndpoint(object):
         self._logged_in = False
         # Whether a nick-name was set for the first time.
         self._nick_set = False
+        # Deduplicate nickname setting.
+        self._last_nickname = None
 
     def __enter__(self):
         return self.lock.__enter__()
@@ -1633,7 +1635,9 @@ class HeimEndpoint(object):
             if nick is not Ellipsis: self.nickname = nick
             if (self.get_connection() is not None and
                     self.nickname is not None):
-                self.logger.info('Setting nickname: %r' % self.nickname)
+                if self.nickname != self._last_nickname:
+                    self._last_nickname = self.nickname
+                    self.logger.info('Setting nickname: %r' % self.nickname)
                 return self.send_packet('nick', name=self.nickname)
 
     def set_passcode(self, code=Ellipsis):
