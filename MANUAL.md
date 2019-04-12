@@ -64,8 +64,8 @@ messages.
     - `msg.id`: The ID of the message.
     - `msg.parent`: The ID of the parent of the message, or `None`.
     - `msg.sender.id`: The user ID of the sender of the message. This may be
-      an `account:` ID for a user logged into an account, or an `agent:` ID
-      otherwise.
+      an `account:` ID for a user logged into an account, or an `agent:` or
+      `bot:` ID otherwise.
     - `msg.sender.name`: The nickname of the sender of the message.
     - `msg.content`: The content of the message.
 
@@ -73,15 +73,16 @@ messages.
   about the message; most notable is:
     - `reply`: A convenience function with the following signature:
 
-          reply(content : str, callback : callable = None) -> int
+            reply(content : str, callback : callable = None) -> int
 
-      This posts a message with a content of `content` as a reply to the
-      message currently being handled (the concrete ID for each instance is
-      stored in the closure and does not change when another message is
-      handled). `callback`, if specified, is called with the server's
-      `send-reply` to "our" reply as the only argument when the server accepts
-      the message; see [`send_chat()`](#send_chat-Post-a-message) for details.
-      The return value is the sequence ID of the `send` packet submitted.
+        This posts a message with a content of `content` as a reply to the
+        message currently being handled (the concrete ID for each instance is
+        stored in the closure and does not change when another message is
+        handled). `callback`, if specified, is called with the server's
+        `send-reply` to "our" reply as the only argument when the server
+        accepts the message; see [`send_chat()`](#send_chat-Post-a-message)
+        for details. The return value is the sequence ID of the `send` packet
+        submitted.
 
     Further members are omitted here; see the [reference](#further-reading)
     for a full listing.
