@@ -1460,7 +1460,8 @@ class HeimEndpoint(object):
 
         Built-in event packet handler.
         """
-        self.logger.info('Logged in.')
+        self.logger.info('Logged in with user ID %r and session ID %r' %
+                         (self.agent_id, self.session_id))
         self.handle_login()
         self._logged_in = True
         self.set_nickname()
