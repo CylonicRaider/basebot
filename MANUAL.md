@@ -267,13 +267,13 @@ bot to handle state initialization / cleanup:
 `basebot` provides automated means of setting up a bot (along with other
 facilities such as logging) with two module-level functions:
 
-- `basebot.run_bot` is called with the bot class as the only positional
+- `basebot.run_main` is called with the bot class as the only positional
   argument (and optional configuration via keyword arguments), and spawns
   the bot defined by the given class in the rooms specified on the command
   line.
 
 - `basebot.run_minibot` takes no positional arguments at all, but keyword
-  arguments only. It is identical from `run_bot`, except that it substitutes
+  arguments only. It is identical from `run_main`, except that it substitutes
   `MiniBot` as the bot class (if none is given explicitly). See
   [above](#procedural-approach) for some arguments of note.
 
@@ -289,7 +289,7 @@ execution. Functionality available across room boundaries should be bound
 here.
 
 The manager class to use can be specified using the `mgrcls` keyword argument
-to `run_bot` or `run_minibot`; its (class) methods are invoked by the latters
+to `run_main` or `run_minibot`; its (class) methods are invoked by the latters
 for the principial actions. Of note are the following:
 
 - `prepare_parser(parser : argparse.ArgumentParser, config : dict) -> None` —
@@ -298,7 +298,7 @@ for the principial actions. Of note are the following:
     This method declares command-line options; refer to the [Python
     documentation](https://docs.python.org/library/argparse.html) for
     details (see in particular the `add_argument` method). `config` is the
-    dictionary of keyword arguments as passed to `run_bot` or `run_minibot`.
+    dictionary of keyword arguments as passed to `run_main` or `run_minibot`.
 
 - `interpret_args(arguments : object, config : dict) -> (bots : list,
   config : dict)` — *Argument processing*
