@@ -145,24 +145,23 @@ def format_delta(delta, fractions=True):
     result for 0 is "0s" (instead of nothing).
     """
     if not fractions:
+        # Deliberately floor-rounding to avoid outputs like "- 0s".
         delta = int(delta)
-    if delta == 0: return '0s'
+    if delta == 0:
+        return '0s'
     ret = []
     if delta < 0:
         ret.append('-')
         delta = -delta
-    if delta >= 86400:
-        ret.append('%dd' % (delta // 86400))
-        delta %= 86400
-    if delta >= 3600:
-        ret.append('%dh' % (delta // 3600))
-        delta %= 3600
-    if delta >= 60:
-        ret.append('%dm' % (delta // 60))
-        delta %= 60
+    for magnitude, letter in ((86400, 'd'), (3600, 'h'), (60, 'm')):
+        if delta < magnitude: continue
+        ret.append('%d%s' % (delta // magnitude, letter))
+        delta %= magnitude
     if delta != 0:
         if delta % 1 != 0:
-            ret.append('%ss' % round(delta, 3))
+            # Cannot use round() here as that would map the input 59.9999 to
+            # "60.0s" instead of "1m".
+            ret.append('%ss' % (int(delta * 1000) / 1000))
         else:
             ret.append('%ds' % delta)
     return ' '.join(ret)
