@@ -175,7 +175,13 @@ def spawn_thread(_target, *_args, **_kwds):
     make it daemonic, start it, and return.
     """
     thr = threading.Thread(target=_target, args=_args, kwargs=_kwds)
-    thr.setDaemon(True)
+    try:
+        # Directly assigning the attribute before it was introduced would
+        # silently succeed without doing anything.
+        thr.daemon
+        thr.daemon = True
+    except AttributeError:
+        thr.setDaemon(True)
     thr.start()
     return thr
 
@@ -1000,7 +1006,7 @@ class HeimEndpoint(object):
                 self._connection = conn
                 if conn is not None:
                     self.handle_connect()
-                self._conncond.notifyAll()
+                self._conncond.notify_all()
 
     def _disconnect(self, ok, final):
         """
@@ -1027,7 +1033,7 @@ class HeimEndpoint(object):
             self._nick_set = False
             conn = self._connection
             self._connection = None
-            self._conncond.notifyAll()
+            self._conncond.notify_all()
         if conn is not None:
             conn.close()
 
@@ -1070,7 +1076,7 @@ class HeimEndpoint(object):
                 self._connection = conn
                 if conn is not None:
                     self.handle_connect()
-                self._conncond.notifyAll()
+                self._conncond.notify_all()
         return True
 
     def connect(self):
@@ -2601,7 +2607,7 @@ class BotManager(object):
         for m in c:
             m.shutdown()
         with self._joincond:
-            self._joincond.notifyAll()
+            self._joincond.notify_all()
 
     def join(self):
         """
@@ -2705,7 +2711,7 @@ class BotManager(object):
             except ValueError:
                 pass
             if self._shutting_down:
-                self._joincond.notifyAll()
+                self._joincond.notify_all()
                 return
 
     def swap_bots(self, old, new):
@@ -2770,7 +2776,7 @@ class BotManager(object):
         if bot:
             self.remove_bot(bot)
             with self._joincond:
-                self._joincond.notifyAll()
+                self._joincond.notify_all()
 
     def main(self):
         """

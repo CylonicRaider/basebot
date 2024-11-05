@@ -57,7 +57,7 @@ class TumbleWeed(basebot.BaseBot):
             else:
                 self.lonely_message = None
             self.sent_comment = False
-            self.cond.notifyAll()
+            self.cond.notify_all()
 
     # Main method. Hooked to spawn the background thread.
     def main(self):
