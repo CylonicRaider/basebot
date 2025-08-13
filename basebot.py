@@ -1,4 +1,5 @@
 # -*- coding: ascii -*-
+
 """
 Bot library for euphoria.io.
 
@@ -2827,4 +2828,3 @@ def run_minibot(**config):
     """
     config.setdefault('botcls', MiniBot)
     run_main(**config)
-
