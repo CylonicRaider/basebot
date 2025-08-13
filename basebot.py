@@ -1,5 +1,4 @@
 # -*- coding: ascii -*-
-
 """
 Bot library for euphoria.io.
 
@@ -49,6 +48,9 @@ import itertools
 import argparse
 import logging
 import threading
+
+# quick fix to change euphoria.io to euphoria.leet.nu
+os.environ["BASEBOT_URL_TEMPLATE"] = "wss://euphoria.leet.nu/room/{}/ws"
 
 # Modules - Additional. Must be installed.
 from websocket_server.compat import unicode
@@ -2827,3 +2829,4 @@ def run_minibot(**config):
     """
     config.setdefault('botcls', MiniBot)
     run_main(**config)
+
