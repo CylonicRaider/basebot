@@ -68,7 +68,7 @@ WHITESPACE_RE = re.compile('\s+')
 
 # Default connection URL template.
 URL_TEMPLATE = os.environ.get('BASEBOT_URL_TEMPLATE',
-                              'wss://euphoria.io/room/{}/ws')
+                              'wss://euphoria.leet.nu/room/{}/ws')
 
 # ---------------------------------------------------------------------------
 # Utilities
