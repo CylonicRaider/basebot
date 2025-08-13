@@ -10,11 +10,11 @@ def today():
 data = json.load(sys.stdin)
 
 # Process data (if not already done).
-meta = data[0]['unMeta']
+meta = data['meta']
 if not meta:
     # Update headings.
     remove = None
-    for n, item in enumerate(data[1]):
+    for n, item in enumerate(data['blocks']):
         if item['t'] == 'Header':
             if item['c'][0] == 1:
                 if remove is not None:
@@ -26,7 +26,7 @@ if not meta:
                 item['c'][0] -= 1
     # Add title to metadata (if found).
     if remove is not None:
-        title = data[1].pop(remove)
+        title = data['blocks'].pop(remove)
         meta['title'] = {'t': 'MetaInlines', 'c': title['c'][2]}
         meta['date'] = {'t': 'MetaInlines', 'c': [
             {'t': 'Str', 'c': today()}
