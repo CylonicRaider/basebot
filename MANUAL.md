@@ -57,7 +57,7 @@ This handler is invoked on "live" chat messages (in the library's parlance),
 _i.e._ `send-event`-s, which correspond to users (or bots) posting new
 messages.
 
-- `msg` is a [`Message`](http://api.euphoria.io/#message) structure,
+- `msg` is a [`Message`](http://api.euphoria.leet.nu/#message) structure,
   presented as an instance of the `basebot.Record` class that is a dictionary
   exposing some items as attributes. The most interesting parts of it (but not
   all; refer to the [reference](#further-reading) for details) are found at:
@@ -146,7 +146,7 @@ This method — which is *not* a handler (but may be overridden anyway) — post
 a chat message. `content` is the text of the message, `parent` is either the
 ID of the parent of the tentative message, or `None` for starting a new
 thread. The function returns the sequence ID (`id` in [the packet
-descritpion](http://api.euphoria.io/#packets)) of the `send` submitted.
+descritpion](http://api.euphoria.leet.nu/#packets)) of the `send` submitted.
 
 An additional keyword-only argument `_callback` may be passed; it is a
 function with the following signature:

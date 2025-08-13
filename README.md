@@ -1,6 +1,7 @@
 # basebot
 
-Moderately sophisticated library for [euphoria.io](http://euphoria.io/) bots.
+Moderately sophisticated library for [Euphoria](http://euphoria.leet.nu/)
+bots.
 
 The actual library consists only of the `basebot.py` file (it depends
 on [`websocket-server`](https://github.com/CylonicRaider/websocket-server/),

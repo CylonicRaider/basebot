@@ -1,7 +1,7 @@
 # -*- coding: ascii -*-
 
 """
-Bot library for euphoria.io.
+Bot library for the Euphoria chat platform.
 
 Important functions and classes:
 normalize_nick() : Normalize a nick (remove whitespace and convert it to
@@ -2407,7 +2407,7 @@ class BotManager(object):
         """
         parser.add_argument('--url-template', metavar='URL',
                             help='WebSocket URL template '
-                                '(wss://euphoria.io/room/{}/ws)')
+                                '(wss://euphoria.leet.nu/room/{}/ws)')
         parser.add_argument('--nickname', metavar='NICK',
                             help='Nick-name to use (none)')
         parser.add_argument('--retry-count', type=int, metavar='COUNT',

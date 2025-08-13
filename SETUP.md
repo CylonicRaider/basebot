@@ -50,7 +50,7 @@ in your source location (either the directory where `basebot.py` lies, or
 anywhere if the latter is in the standard module path), and start the bot
 from the command line by running `python testbot.py test` in the
 corresponding directory. The bot should appear in the room
-[*&test*](https://euphoria.io/room/test) under the nickname *test*.
+[*&test*](https://euphoria.leet.nu/room/test) under the nickname *test*.
 
 ```python
 import sys, basebot
@@ -98,13 +98,13 @@ or use your favorite documentation generator.
 
 ### Alternative sites
 
-The bot library has the domain name [euphoria.io](https://euphoria.io)
-built-in as a default. If you want to run a bot at an alternative site, you
-can achieve that by setting the `BASEBOT_URL_TEMPLATE` environment variable,
-or the `--url-template` command-line option. It is `{}`-formatted by the bot
-library with the room name to enter, and the library tries to connect to the
-resulting URL.
+The bot library has the domain name
+[euphoria.leet.nu](https://euphoria.leet.nu) built in as a default. If you
+want to run a bot at an alternative site, you can achieve that by setting the
+`BASEBOT_URL_TEMPLATE` environment variable, or the `--url-template`
+command-line option. It is `{}`-formatted by the bot library with the room
+name to enter, and the library tries to connect to the resulting URL.
 
-The default preset is `wss://euphoria.io/room/{}/ws`, therefore, trying
+The default preset is `wss://euphoria.leet.nu/room/{}/ws`, therefore, trying
 to enter the room `test` using the default settings would result in a
-connection attempt to `wss://euphoria.io/room/test/ws`.
+connection attempt to `wss://euphoria.leet.nu/room/test/ws`.
