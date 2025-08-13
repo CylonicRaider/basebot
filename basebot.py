@@ -49,8 +49,6 @@ import argparse
 import logging
 import threading
 
-# quick fix to change euphoria.io to euphoria.leet.nu
-os.environ["BASEBOT_URL_TEMPLATE"] = "wss://euphoria.leet.nu/room/{}/ws"
 
 # Modules - Additional. Must be installed.
 from websocket_server.compat import unicode
@@ -70,7 +68,7 @@ WHITESPACE_RE = re.compile('\s+')
 
 # Default connection URL template.
 URL_TEMPLATE = os.environ.get('BASEBOT_URL_TEMPLATE',
-                              'wss://euphoria.io/room/{}/ws')
+                              'wss://euphoria.leet.nu/room/{}/ws')
 
 # ---------------------------------------------------------------------------
 # Utilities
