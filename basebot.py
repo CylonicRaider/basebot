@@ -50,7 +50,6 @@ import argparse
 import logging
 import threading
 
-
 # Modules - Additional. Must be installed.
 from websocket_server.compat import unicode
 from websocket_server.cookies import CookieJar, LWPCookieJar
